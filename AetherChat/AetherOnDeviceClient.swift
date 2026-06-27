@@ -9,10 +9,14 @@ actor AetherOnDeviceClient {
     private var engine: AetherLlamaEngine?
     #endif
 
-    func send(persona: AssistantPersona, messages: [ChatMessage]) async throws -> String {
+    typealias StatusHandler = @Sendable (String?) async -> Void
+
+    func send(persona: AssistantPersona, messages: [ChatMessage], status: StatusHandler? = nil) async throws -> String {
         #if canImport(LlamaSwift)
-        let modelFiles = try await AetherModelStore.localAetherV1Files()
+        let modelFiles = try await AetherModelStore.localAetherV1Files(status: status)
+        await status?("Loading Aether V1 into memory")
         let engine = try loadEngine(modelURL: modelFiles.modelURL, mmprojURL: modelFiles.mmprojURL)
+        await status?(nil)
         let prompt = AetherPromptBuilder.prompt(persona: persona, messages: messages)
         let promptAttachments = messages.suffix(16).flatMap(\.attachments)
         return try engine.generate(prompt: prompt, attachments: promptAttachments)
@@ -36,7 +40,7 @@ actor AetherOnDeviceClient {
 enum AetherOnDeviceError: LocalizedError {
     case llamaUnavailable
     case invalidModelURL
-    case modelDownloadFailed
+    case modelDownloadFailed(String)
     case modelLoadFailed
     case contextLoadFailed
     case tokenizationFailed
@@ -54,8 +58,8 @@ enum AetherOnDeviceError: LocalizedError {
             return "llama.cpp is not linked into this build."
         case .invalidModelURL:
             return "Aether V1 model URL is invalid."
-        case .modelDownloadFailed:
-            return "Aether V1 GGUF model download failed."
+        case .modelDownloadFailed(let detail):
+            return "Aether V1 GGUF model download failed: \(detail)"
         case .modelLoadFailed:
             return "Aether V1 GGUF model could not be loaded."
         case .contextLoadFailed:
@@ -86,39 +90,58 @@ enum AetherModelStore {
         let mmprojURL: URL
     }
 
-    static func localAetherV1Files() async throws -> AetherV1Files {
+    static func localAetherV1Files(status: AetherOnDeviceClient.StatusHandler? = nil) async throws -> AetherV1Files {
         let directory = try modelDirectory()
         return AetherV1Files(
             modelURL: try await localFile(
                 directory: directory,
                 filename: AetherModelCatalog.aetherV1GGUFFilename,
-                remoteURL: AetherModelCatalog.aetherV1DownloadURL
+                remoteURL: AetherModelCatalog.aetherV1DownloadURL,
+                label: "Aether V1 language model",
+                status: status
             ),
             mmprojURL: try await localFile(
                 directory: directory,
                 filename: AetherModelCatalog.aetherV1MMProjFilename,
-                remoteURL: AetherModelCatalog.aetherV1MMProjDownloadURL
+                remoteURL: AetherModelCatalog.aetherV1MMProjDownloadURL,
+                label: "Aether V1 vision projector",
+                status: status
             )
         )
     }
 
-    private static func localFile(directory: URL, filename: String, remoteURL: URL) async throws -> URL {
+    private static func localFile(
+        directory: URL,
+        filename: String,
+        remoteURL: URL,
+        label: String,
+        status: AetherOnDeviceClient.StatusHandler?
+    ) async throws -> URL {
         let destination = directory.appendingPathComponent(filename)
         if FileManager.default.fileExists(atPath: destination.path) {
             return destination
         }
 
-        let (temporaryURL, response) = try await URLSession.shared.download(from: remoteURL)
+        await status?("Downloading \(label)")
+        let temporaryURL: URL
+        let response: URLResponse
+        do {
+            (temporaryURL, response) = try await URLSession.shared.download(from: remoteURL)
+        } catch {
+            throw AetherOnDeviceError.modelDownloadFailed(error.localizedDescription)
+        }
         guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else {
-            throw AetherOnDeviceError.modelDownloadFailed
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
+            throw AetherOnDeviceError.modelDownloadFailed("HTTP \(statusCode) for \(filename)")
         }
 
+        await status?("Caching \(label)")
         try? FileManager.default.removeItem(at: destination)
         do {
             try FileManager.default.moveItem(at: temporaryURL, to: destination)
             return destination
         } catch {
-            throw AetherOnDeviceError.modelDownloadFailed
+            throw AetherOnDeviceError.modelDownloadFailed(error.localizedDescription)
         }
     }
 

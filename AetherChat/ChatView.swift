@@ -19,41 +19,49 @@ struct ChatView: View {
 
     var body: some View {
         OakBackground {
-            VStack(spacing: 0) {
-                // Messages
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVStack(spacing: 8) {
-                            if conversation?.messages.isEmpty ?? true {
-                                ChatEmptyState(personaName: conversation?.persona.name ?? "Aether",
-                                               isDark: state.isDarkTheme)
+            ZStack {
+                VStack(spacing: 0) {
+                    // Messages
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            LazyVStack(spacing: 8) {
+                                if conversation?.messages.isEmpty ?? true {
+                                    ChatEmptyState(personaName: conversation?.persona.name ?? "Aether",
+                                                   isDark: state.isDarkTheme)
+                                }
+                                ForEach(conversation?.messages ?? []) { msg in
+                                    MessageBubble(message: msg, isDark: state.isDarkTheme)
+                                        .id(msg.id)
+                                }
+                                if isSending && state.modelLoadingMessage == nil {
+                                    TypingIndicator(isDark: state.isDarkTheme)
+                                        .id("typing")
+                                }
                             }
-                            ForEach(conversation?.messages ?? []) { msg in
-                                MessageBubble(message: msg, isDark: state.isDarkTheme)
-                                    .id(msg.id)
-                            }
-                            if isSending {
-                                TypingIndicator(isDark: state.isDarkTheme)
-                                    .id("typing")
+                            .padding(.vertical, 16)
+                        }
+                        .scrollDismissesKeyboard(.interactively)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            inputFocused = false
+                        }
+                        .onChange(of: conversation?.messages.count) {
+                            if let last = conversation?.messages.last {
+                                withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
                             }
                         }
-                        .padding(.vertical, 16)
-                    }
-                    .scrollDismissesKeyboard(.interactively)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        inputFocused = false
-                    }
-                    .onChange(of: conversation?.messages.count) {
-                        if let last = conversation?.messages.last {
-                            withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
+                        .onChange(of: isSending) {
+                            if isSending { withAnimation { proxy.scrollTo("typing", anchor: .bottom) } }
                         }
-                    }
-                    .onChange(of: isSending) {
-                        if isSending { withAnimation { proxy.scrollTo("typing", anchor: .bottom) } }
                     }
                 }
+
+                if let loadingMessage = state.modelLoadingMessage {
+                    ModelLoadingOverlay(message: loadingMessage, isDark: state.isDarkTheme)
+                        .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                }
             }
+            .animation(.easeInOut(duration: 0.22), value: state.modelLoadingMessage)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             InputBar(
@@ -120,6 +128,82 @@ struct ChatView: View {
     private func normalizedJPEGData(from data: Data) -> Data? {
         guard let image = UIImage(data: data) else { return data }
         return image.jpegData(compressionQuality: 0.82)
+    }
+}
+
+struct ModelLoadingOverlay: View {
+    let message: String
+    let isDark: Bool
+    @State private var rotation = 0.0
+    @State private var pulse = false
+
+    var body: some View {
+        ZStack {
+            Rectangle()
+                .fill((isDark ? Color.black : AetherColors.oakCream).opacity(isDark ? 0.58 : 0.46))
+                .background(.ultraThinMaterial)
+                .ignoresSafeArea()
+
+            VStack(spacing: 18) {
+                ZStack {
+                    Circle()
+                        .stroke(AetherColors.oakPale.opacity(0.28), lineWidth: 14)
+                        .frame(width: 116, height: 116)
+
+                    Circle()
+                        .trim(from: 0.08, to: 0.72)
+                        .stroke(
+                            AngularGradient(
+                                colors: [AetherColors.oakMedium, AetherColors.copper, AetherColors.amber, AetherColors.oakMedium],
+                                center: .center
+                            ),
+                            style: StrokeStyle(lineWidth: 14, lineCap: .round)
+                        )
+                        .frame(width: 116, height: 116)
+                        .rotationEffect(.degrees(rotation))
+
+                    Image(systemName: "leaf.fill")
+                        .font(.system(size: 34, weight: .semibold))
+                        .foregroundColor(AetherColors.oakMedium)
+                        .scaleEffect(pulse ? 1.08 : 0.94)
+                }
+
+                VStack(spacing: 8) {
+                    Text("Rooting Aether V1")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundColor(isDark ? AetherColors.oakCream : AetherColors.warmBlack)
+                    Text(message)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(isDark ? AetherColors.warmGray200 : AetherColors.warmGray600)
+                        .multilineTextAlignment(.center)
+                    Text("First launch can take a while while the model settles into local storage.")
+                        .font(.system(size: 12))
+                        .foregroundColor(isDark ? AetherColors.warmGray400 : AetherColors.warmGray500)
+                        .multilineTextAlignment(.center)
+                        .padding(.top, 2)
+                }
+            }
+            .padding(.horizontal, 26)
+            .padding(.vertical, 30)
+            .frame(maxWidth: 310)
+            .background(
+                RoundedRectangle(cornerRadius: 30, style: .continuous)
+                    .fill(isDark ? AetherColors.warmGray900.opacity(0.92) : Color.white.opacity(0.9))
+                    .shadow(color: .black.opacity(0.18), radius: 28, y: 16)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 30, style: .continuous)
+                    .stroke(AetherColors.oakPale.opacity(0.35), lineWidth: 1)
+            )
+        }
+        .onAppear {
+            withAnimation(.linear(duration: 1.15).repeatForever(autoreverses: false)) {
+                rotation = 360
+            }
+            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
+                pulse = true
+            }
+        }
     }
 }
 

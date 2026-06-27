@@ -74,6 +74,7 @@ class AppState: ObservableObject {
     @Published var inferenceProvider: InferenceProvider = InferenceProvider(rawValue: UserDefaults.standard.string(forKey: "inferenceProvider") ?? "") ?? .onDevice {
         didSet { UserDefaults.standard.set(inferenceProvider.rawValue, forKey: "inferenceProvider") }
     }
+    @Published var modelLoadingMessage: String?
     @Published var defaultWorkspace: Workspace = .personal
     private let backend = AetherBackendClient()
     private let onDevice = AetherOnDeviceClient()
@@ -105,9 +106,11 @@ class AppState: ObservableObject {
                 persona: persona,
                 messages: messageSnapshot
             )
+            modelLoadingMessage = nil
             appendAssistantMessage(to: id, content: response)
         } catch {
-            appendAssistantMessage(to: id, content: "Inference error: \(error.localizedDescription)")
+            modelLoadingMessage = nil
+            appendAssistantMessage(to: id, content: "Inference error: \(inferenceErrorDescription(error))")
         }
     }
 
@@ -115,7 +118,12 @@ class AppState: ObservableObject {
         if selectedModel == AetherModelCatalog.aetherV1DisplayName {
             return try await onDevice.send(
                 persona: persona,
-                messages: messages
+                messages: messages,
+                status: { [weak self] message in
+                    await MainActor.run {
+                        self?.modelLoadingMessage = message
+                    }
+                }
             )
         }
 
@@ -137,6 +145,17 @@ class AppState: ObservableObject {
         conversations[idx].messages.append(reply)
         conversations[idx].previewText = reply.content
         conversations[idx].updatedAt = Date()
+    }
+
+    private func inferenceErrorDescription(_ error: Error) -> String {
+        if let localized = error as? LocalizedError, let description = localized.errorDescription {
+            return description
+        }
+        let nsError = error as NSError
+        if !nsError.localizedDescription.isEmpty {
+            return nsError.localizedDescription
+        }
+        return String(describing: error)
     }
 }
 
