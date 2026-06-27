@@ -53,7 +53,9 @@ struct ChatView: View {
                         }
                         .onChange(of: conversation?.messages.count) {
                             if let last = conversation?.messages.last {
-                                withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
+                                withAnimation {
+                                    proxy.scrollTo(last.id, anchor: last.role == .assistant ? .top : .bottom)
+                                }
                             }
                         }
                         .onChange(of: isSending) {

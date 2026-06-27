@@ -107,7 +107,7 @@ struct ConversationListView: View {
         }
         .sheet(isPresented: $showNewChat) {
             NewChatSheet(onCreate: { title, ws, persona in
-                state.createConversation(title: title, workspace: ws, persona: persona)
+                selectedConversationId = state.createConversation(title: title, workspace: ws, persona: persona)
                 showNewChat = false
             })
         }

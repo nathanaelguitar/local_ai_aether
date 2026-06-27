@@ -143,9 +143,11 @@ class AppState: ObservableObject {
         conversations.removeAll { $0.id == id }
     }
 
-    func createConversation(title: String, workspace: Workspace, persona: AssistantPersona) {
+    func createConversation(title: String, workspace: Workspace, persona: AssistantPersona) -> UUID {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        conversations.insert(Conversation(title: trimmed.isEmpty ? "Untitled" : trimmed, workspace: workspace, persona: persona), at: 0)
+        let conversation = Conversation(title: trimmed.isEmpty ? "Untitled" : trimmed, workspace: workspace, persona: persona)
+        conversations.insert(conversation, at: 0)
+        return conversation.id
     }
 
     func renameConversation(_ id: UUID, title: String) {
