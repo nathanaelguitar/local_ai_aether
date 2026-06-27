@@ -241,7 +241,7 @@ struct MessageBubble: View {
                             .font(.system(size: 15))
                             .foregroundColor(isDark ? AetherColors.warmGray200 : AetherColors.warmBlack)
                     } else {
-                        MarkdownMessageText(message.content)
+                        MarkdownMessageText(message.content, isDark: isDark)
                             .foregroundColor(isDark ? AetherColors.warmGray200 : AetherColors.warmBlack)
                     }
                 }
@@ -270,9 +270,11 @@ struct MessageBubble: View {
 
 struct MarkdownMessageText: View {
     let content: String
+    let isDark: Bool
 
-    init(_ content: String) {
+    init(_ content: String, isDark: Bool) {
         self.content = content
+        self.isDark = isDark
     }
 
     var body: some View {
@@ -313,10 +315,10 @@ struct MarkdownMessageText: View {
             }
 
         case .code(let code):
-            CodeBlockView(code: code)
+            CodeBlockView(code: code, isDark: isDark)
 
         case .table(let rows):
-            CodeBlockView(code: rows.joined(separator: "\n"))
+            CodeBlockView(code: rows.joined(separator: "\n"), isDark: isDark)
         }
     }
 
@@ -339,39 +341,26 @@ struct MarkdownMessageText: View {
 
 struct CodeBlockView: View {
     let code: String
+    let isDark: Bool
 
     var body: some View {
-        VStack(spacing: 7) {
-            ScrollView(.horizontal, showsIndicators: true) {
-                Text(code)
-                    .font(.system(size: 13, design: .monospaced))
-                    .lineSpacing(3)
-                    .textSelection(.enabled)
-                    .padding(12)
-                    .fixedSize(horizontal: true, vertical: false)
-            }
-            .scrollIndicators(.visible)
-            .background(AetherColors.warmGray100.opacity(0.95))
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-
-            HStack(spacing: 6) {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 8, weight: .bold))
-                Capsule()
-                    .fill(AetherColors.oakMedium.opacity(0.28))
-                    .frame(height: 4)
-                    .overlay(alignment: .leading) {
-                        Capsule()
-                            .fill(AetherColors.oakMedium.opacity(0.78))
-                            .frame(width: 42, height: 4)
-                    }
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 8, weight: .bold))
-            }
-            .foregroundColor(AetherColors.oakMedium.opacity(0.72))
-            .padding(.horizontal, 10)
-            .accessibilityHidden(true)
+        ScrollView(.horizontal, showsIndicators: true) {
+            Text(code)
+                .font(.system(size: 13, design: .monospaced))
+                .foregroundColor(isDark ? AetherColors.warmGray100 : AetherColors.warmBlack)
+                .lineSpacing(3)
+                .textSelection(.enabled)
+                .padding(12)
+                .padding(.bottom, 6)
+                .fixedSize(horizontal: true, vertical: false)
         }
+        .scrollIndicators(.visible)
+        .background(isDark ? AetherColors.warmGray900.opacity(0.92) : AetherColors.warmGray100.opacity(0.95))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(isDark ? AetherColors.oakMedium.opacity(0.24) : Color.clear, lineWidth: 1)
+        )
     }
 }
 
