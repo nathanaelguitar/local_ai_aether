@@ -13,7 +13,7 @@ enum AetherModelCatalog {
     static let requestedGGUFQuantization = "Q4_K_M"
     static let aetherV1GGUFFilename = "Qwen3.5-2b-Kimi-and-Opus-Distillation.Q4_K_M.gguf"
     static let aetherV1MMProjFilename = "Qwen3.5-2b-Kimi-and-Opus-Distillation.mmproj-Q8_0.gguf"
-    static let aetherV1ContextTokens: Int32 = 8192
+    static let aetherV1ContextTokens: Int32 = 20000
     static let aetherV1BatchTokens: Int32 = 2048
     static let aetherV1ImageMaxTokens: Int32 = 768
     static let aetherV1MaxOutputTokens: Int32 = 512
