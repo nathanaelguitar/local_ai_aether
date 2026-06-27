@@ -452,29 +452,30 @@ struct InputBar: View {
 
 struct TypingIndicator: View {
     let isDark: Bool
-    @State private var phase = 0.0
 
     var body: some View {
         HStack {
-            HStack(spacing: 5) {
-                ForEach(0..<3, id: \.self) { i in
-                    Circle()
-                        .fill(isDark ? AetherColors.warmGray400 : AetherColors.warmGray500)
-                        .frame(width: 7, height: 7)
-                        .offset(y: sin(phase + Double(i) * 0.8) * 3)
+            TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
+                let time = timeline.date.timeIntervalSinceReferenceDate
+                HStack(spacing: 6) {
+                    ForEach(0..<3, id: \.self) { index in
+                        let phase = time * 5.2 - Double(index) * 0.62
+                        let lift = max(0, sin(phase)) * -7
+                        Circle()
+                            .fill(isDark ? AetherColors.warmGray400 : AetherColors.warmGray500)
+                            .frame(width: 8, height: 8)
+                            .offset(y: lift)
+                            .scaleEffect(1 + max(0, sin(phase)) * 0.22)
+                            .opacity(0.62 + max(0, sin(phase)) * 0.38)
+                    }
                 }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 14)
+                .background(isDark ? AetherColors.warmGray800 : Color.white)
+                .clipShape(Capsule())
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 14)
-            .background(isDark ? AetherColors.warmGray800 : Color.white)
-            .clipShape(Capsule())
             .padding(.leading, 16)
             Spacer()
-        }
-        .onAppear {
-            withAnimation(.linear(duration: 1.0).repeatForever(autoreverses: false)) {
-                phase = .pi * 2
-            }
         }
     }
 }

@@ -3,6 +3,7 @@ import SwiftUI
 struct ContentView: View {
     @StateObject private var state = AppState()
     @State private var showConversations = false
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         Group {
@@ -26,6 +27,12 @@ struct ContentView: View {
             }
         }
         .animation(.easeInOut(duration: 0.4), value: showConversations)
+        .task {
+            await AetherNotifications.requestAuthorization()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            state.appIsActive = phase == .active
+        }
     }
 }
 

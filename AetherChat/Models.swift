@@ -1,4 +1,43 @@
 import Foundation
+import UIKit
+import UserNotifications
+
+enum AetherNotifications {
+    static func requestAuthorization() async {
+        do {
+            try await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound])
+        } catch {
+            // Notifications are optional; inference still works if authorization is denied.
+        }
+    }
+
+    static func notifyReplyReady(title: String, body: String) {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = .default
+
+        let request = UNNotificationRequest(
+            identifier: "aether.reply.\(UUID().uuidString)",
+            content: content,
+            trigger: nil
+        )
+        UNUserNotificationCenter.current().add(request)
+    }
+}
+
+enum AetherBackgroundTask {
+    @MainActor
+    static func begin(name: String, expirationHandler: @escaping @Sendable () -> Void = {}) -> UIBackgroundTaskIdentifier {
+        UIApplication.shared.beginBackgroundTask(withName: name, expirationHandler: expirationHandler)
+    }
+
+    @MainActor
+    static func end(_ identifier: UIBackgroundTaskIdentifier) {
+        guard identifier != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(identifier)
+    }
+}
 
 struct Conversation: Identifiable, Sendable {
     let id: UUID
@@ -75,6 +114,7 @@ class AppState: ObservableObject {
         didSet { UserDefaults.standard.set(inferenceProvider.rawValue, forKey: "inferenceProvider") }
     }
     @Published var modelLoadingMessage: String?
+    @Published var appIsActive = true
     @Published var defaultWorkspace: Workspace = .personal
     private let backend = AetherBackendClient()
     private let onDevice = AetherOnDeviceClient()
@@ -101,6 +141,13 @@ class AppState: ObservableObject {
 
         let persona = conversations[idx].persona
         let messageSnapshot = conversations[idx].messages
+        let task = AetherBackgroundTask.begin(name: "Aether V1 inference") { [weak self] in
+            Task { @MainActor in
+                self?.modelLoadingMessage = nil
+            }
+        }
+        defer { AetherBackgroundTask.end(task) }
+
         do {
             let response = try await generateReply(
                 persona: persona,
@@ -108,9 +155,12 @@ class AppState: ObservableObject {
             )
             modelLoadingMessage = nil
             appendAssistantMessage(to: id, content: response)
+            notifyIfNeeded(conversationTitle: conversations.first(where: { $0.id == id })?.title ?? "Aether", response: response)
         } catch {
             modelLoadingMessage = nil
-            appendAssistantMessage(to: id, content: "Inference error: \(inferenceErrorDescription(error))")
+            let errorMessage = "Inference error: \(inferenceErrorDescription(error))"
+            appendAssistantMessage(to: id, content: errorMessage)
+            notifyIfNeeded(conversationTitle: conversations.first(where: { $0.id == id })?.title ?? "Aether", response: errorMessage)
         }
     }
 
@@ -156,6 +206,17 @@ class AppState: ObservableObject {
             return nsError.localizedDescription
         }
         return String(describing: error)
+    }
+
+    private func notifyIfNeeded(conversationTitle: String, response: String) {
+        guard !appIsActive else { return }
+        let preview = response
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        AetherNotifications.notifyReplyReady(
+            title: "\(conversationTitle) replied",
+            body: String(preview.prefix(160))
+        )
     }
 }
 
