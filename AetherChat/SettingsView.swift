@@ -52,6 +52,14 @@ struct SettingsView: View {
                         // AI config
                         SettingsSection(title: "AI Configuration") {
                             VStack(spacing: 0) {
+                                Picker("Provider", selection: $state.inferenceProvider) {
+                                    ForEach(InferenceProvider.allCases) { provider in
+                                        Text(provider.rawValue).tag(provider)
+                                    }
+                                }
+                                .pickerStyle(.segmented)
+                                .padding(12)
+                                Divider().padding(.leading, 56)
                                 SettingsNavRow(icon: "network", title: "API Endpoint",
                                                subtitle: state.apiEndpoint.isEmpty ? "Not configured" : state.apiEndpoint) {
                                     showApiDialog = true
@@ -60,6 +68,18 @@ struct SettingsView: View {
                                 SettingsNavRow(icon: "cpu", title: "Model",
                                                subtitle: state.selectedModel) {
                                     showModelDialog = true
+                                }
+                                if state.selectedModel == AetherModelCatalog.aetherV1DisplayName {
+                                    Divider().padding(.leading, 56)
+                                    SettingsNavRow(icon: "iphone.gen3", title: "Aether V1 MLX Repo",
+                                                   subtitle: state.aetherV1MLXRepository.isEmpty ? "Needs converted MLX repo" : state.aetherV1MLXRepository) {
+                                        showModelDialog = true
+                                    }
+                                    Text(AetherModelCatalog.aetherV1NeedsConversionMessage)
+                                        .font(.system(size: 12))
+                                        .foregroundColor(AetherColors.warmGray500)
+                                        .padding(.horizontal, 16)
+                                        .padding(.bottom, 12)
                                 }
                             }
                             .background(Color(UIColor.secondarySystemBackground))
@@ -110,7 +130,7 @@ struct SettingsView: View {
             ApiConfigSheet(endpoint: $state.apiEndpoint)
         }
         .sheet(isPresented: $showModelDialog) {
-            ModelConfigSheet(model: $state.selectedModel)
+            ModelConfigSheet(model: $state.selectedModel, mlxRepository: $state.aetherV1MLXRepository)
         }
     }
 }
@@ -217,8 +237,10 @@ struct ApiConfigSheet: View {
 
 struct ModelConfigSheet: View {
     @Binding var model: String
+    @Binding var mlxRepository: String
     @Environment(\.dismiss) var dismiss
     @State private var temp = ""
+    @State private var tempMLXRepository = ""
 
     var body: some View {
         NavigationStack {
@@ -227,6 +249,17 @@ struct ModelConfigSheet: View {
                     TextField("aether-local", text: $temp)
                         .autocapitalization(.none)
                         .textInputAutocapitalization(.never)
+                }
+                Section("Aether V1") {
+                    Button(AetherModelCatalog.aetherV1DisplayName) {
+                        temp = AetherModelCatalog.aetherV1DisplayName
+                    }
+                    TextField("Converted MLX repository", text: $tempMLXRepository)
+                        .autocapitalization(.none)
+                        .textInputAutocapitalization(.never)
+                    Text(AetherModelCatalog.aetherV1NeedsConversionMessage)
+                        .font(.system(size: 12))
+                        .foregroundColor(AetherColors.warmGray500)
                 }
             }
             .navigationTitle("Model")
@@ -238,6 +271,7 @@ struct ModelConfigSheet: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Save") {
                         model = temp.trimmingCharacters(in: .whitespacesAndNewlines)
+                        mlxRepository = tempMLXRepository.trimmingCharacters(in: .whitespacesAndNewlines)
                         dismiss()
                     }
                     .foregroundColor(AetherColors.oakMedium)
@@ -245,7 +279,10 @@ struct ModelConfigSheet: View {
                 }
             }
         }
-        .onAppear { temp = model }
+        .onAppear {
+            temp = model
+            tempMLXRepository = mlxRepository
+        }
     }
 }
 

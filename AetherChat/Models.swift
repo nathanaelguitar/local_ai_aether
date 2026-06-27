@@ -48,11 +48,18 @@ class AppState: ObservableObject {
     @Published var apiEndpoint: String = UserDefaults.standard.string(forKey: "apiEndpoint") ?? "http://127.0.0.1:8787" {
         didSet { UserDefaults.standard.set(apiEndpoint, forKey: "apiEndpoint") }
     }
-    @Published var selectedModel: String = UserDefaults.standard.string(forKey: "selectedModel") ?? "aether-local" {
+    @Published var selectedModel: String = UserDefaults.standard.string(forKey: "selectedModel") ?? AetherModelCatalog.aetherV1DisplayName {
         didSet { UserDefaults.standard.set(selectedModel, forKey: "selectedModel") }
+    }
+    @Published var inferenceProvider: InferenceProvider = InferenceProvider(rawValue: UserDefaults.standard.string(forKey: "inferenceProvider") ?? "") ?? .onDevice {
+        didSet { UserDefaults.standard.set(inferenceProvider.rawValue, forKey: "inferenceProvider") }
+    }
+    @Published var aetherV1MLXRepository: String = AetherModelCatalog.defaultMLXRepository {
+        didSet { UserDefaults.standard.set(aetherV1MLXRepository, forKey: "aetherV1MLXRepository") }
     }
     @Published var defaultWorkspace: Workspace = .personal
     private let backend = AetherBackendClient()
+    private let onDevice = AetherOnDeviceClient()
 
     func togglePin(_ id: UUID) {
         guard let idx = conversations.firstIndex(where: { $0.id == id }) else { return }
@@ -77,16 +84,42 @@ class AppState: ObservableObject {
         let persona = conversations[idx].persona
         let messageSnapshot = conversations[idx].messages
         do {
-            let response = try await backend.send(
-                endpoint: apiEndpoint,
-                model: selectedModel,
+            let response = try await generateReply(
                 persona: persona,
-                messages: messageSnapshot
+                messages: messageSnapshot,
+                latestText: text
             )
             appendAssistantMessage(to: id, content: response)
         } catch {
-            appendAssistantMessage(to: id, content: "Backend error: \(error.localizedDescription)")
+            appendAssistantMessage(to: id, content: "Inference error: \(error.localizedDescription)")
         }
+    }
+
+    private func generateReply(persona: AssistantPersona, messages: [ChatMessage], latestText: String) async throws -> String {
+        if inferenceProvider == .onDevice && selectedModel == AetherModelCatalog.aetherV1DisplayName {
+            do {
+                return try await onDevice.send(
+                    modelRepository: aetherV1MLXRepository,
+                    persona: persona,
+                    text: latestText
+                )
+            } catch {
+                let backendReply = try await backend.send(
+                    endpoint: apiEndpoint,
+                    model: selectedModel,
+                    persona: persona,
+                    messages: messages
+                )
+                return "\(error.localizedDescription)\n\nBackend fallback replied:\n\(backendReply)"
+            }
+        }
+
+        return try await backend.send(
+            endpoint: apiEndpoint,
+            model: selectedModel,
+            persona: persona,
+            messages: messages
+        )
     }
 
     private func appendAssistantMessage(to id: UUID, content: String) {
