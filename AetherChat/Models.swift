@@ -1,6 +1,6 @@
 import Foundation
 
-struct Conversation: Identifiable {
+struct Conversation: Identifiable, Sendable {
     let id: UUID
     var title: String
     var workspace: Workspace
@@ -17,7 +17,7 @@ struct Conversation: Identifiable {
     }
 }
 
-struct ChatMessage: Identifiable {
+struct ChatMessage: Identifiable, Sendable {
     let id: UUID
     let role: MessageRole
     var content: String
@@ -28,15 +28,31 @@ struct ChatMessage: Identifiable {
     }
 }
 
-enum MessageRole { case user, assistant }
+enum MessageRole: Sendable {
+    case user, assistant
+
+    var apiRole: String {
+        switch self {
+        case .user: return "user"
+        case .assistant: return "assistant"
+        }
+    }
+}
 
 @MainActor
 class AppState: ObservableObject {
     @Published var conversations: [Conversation] = sampleConversations
-    @Published var isDarkTheme: Bool = false
-    @Published var apiEndpoint: String = ""
-    @Published var selectedModel: String = "Canopy V1"
+    @Published var isDarkTheme: Bool = UserDefaults.standard.bool(forKey: "isDarkTheme") {
+        didSet { UserDefaults.standard.set(isDarkTheme, forKey: "isDarkTheme") }
+    }
+    @Published var apiEndpoint: String = UserDefaults.standard.string(forKey: "apiEndpoint") ?? "http://127.0.0.1:8787" {
+        didSet { UserDefaults.standard.set(apiEndpoint, forKey: "apiEndpoint") }
+    }
+    @Published var selectedModel: String = UserDefaults.standard.string(forKey: "selectedModel") ?? "aether-local" {
+        didSet { UserDefaults.standard.set(selectedModel, forKey: "selectedModel") }
+    }
     @Published var defaultWorkspace: Workspace = .personal
+    private let backend = AetherBackendClient()
 
     func togglePin(_ id: UUID) {
         guard let idx = conversations.firstIndex(where: { $0.id == id }) else { return }
@@ -51,18 +67,34 @@ class AppState: ObservableObject {
         conversations.insert(Conversation(title: title, workspace: workspace, persona: persona), at: 0)
     }
 
-    func sendMessage(in id: UUID, text: String) {
+    func sendMessage(in id: UUID, text: String) async {
         guard let idx = conversations.firstIndex(where: { $0.id == id }) else { return }
         let userMsg = ChatMessage(role: .user, content: text)
         conversations[idx].messages.append(userMsg)
         conversations[idx].previewText = text
         conversations[idx].updatedAt = Date()
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-            let reply = ChatMessage(role: .assistant, content: "I hear you. Let me think about that for a moment and offer something rooted and considered. 🌿")
-            self.conversations[idx].messages.append(reply)
-            self.conversations[idx].previewText = reply.content
+        let persona = conversations[idx].persona
+        let messageSnapshot = conversations[idx].messages
+        do {
+            let response = try await backend.send(
+                endpoint: apiEndpoint,
+                model: selectedModel,
+                persona: persona,
+                messages: messageSnapshot
+            )
+            appendAssistantMessage(to: id, content: response)
+        } catch {
+            appendAssistantMessage(to: id, content: "Backend error: \(error.localizedDescription)")
         }
+    }
+
+    private func appendAssistantMessage(to id: UUID, content: String) {
+        guard let idx = conversations.firstIndex(where: { $0.id == id }) else { return }
+        let reply = ChatMessage(role: .assistant, content: content)
+        conversations[idx].messages.append(reply)
+        conversations[idx].previewText = reply.content
+        conversations[idx].updatedAt = Date()
     }
 }
 

@@ -39,7 +39,7 @@ extension Color {
     }
 }
 
-enum Workspace: String, CaseIterable, Identifiable {
+enum Workspace: String, CaseIterable, Identifiable, Sendable {
     case personal = "Personal"
     case work     = "Work"
     case creative = "Creative"
@@ -75,7 +75,7 @@ enum Workspace: String, CaseIterable, Identifiable {
     }
 }
 
-struct AssistantPersona: Identifiable, Equatable {
+struct AssistantPersona: Identifiable, Equatable, Sendable {
     let id: String
     let name: String
     let description: String

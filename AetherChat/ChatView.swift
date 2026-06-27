@@ -72,8 +72,8 @@ struct ChatView: View {
         guard !text.isEmpty, !isSending else { return }
         inputText = ""
         isSending = true
-        state.sendMessage(in: conversationId, text: text)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+        Task {
+            await state.sendMessage(in: conversationId, text: text)
             isSending = false
         }
     }

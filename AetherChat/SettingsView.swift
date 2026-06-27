@@ -4,6 +4,7 @@ struct SettingsView: View {
     @EnvironmentObject var state: AppState
     @Environment(\.dismiss) var dismiss
     @State private var showApiDialog = false
+    @State private var showModelDialog = false
     @State private var tempEndpoint = ""
     @State private var tempModel = ""
 
@@ -57,7 +58,9 @@ struct SettingsView: View {
                                 }
                                 Divider().padding(.leading, 56)
                                 SettingsNavRow(icon: "cpu", title: "Model",
-                                               subtitle: state.selectedModel) { }
+                                               subtitle: state.selectedModel) {
+                                    showModelDialog = true
+                                }
                             }
                             .background(Color(UIColor.secondarySystemBackground))
                             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -105,6 +108,9 @@ struct SettingsView: View {
         .preferredColorScheme(state.isDarkTheme ? .dark : .light)
         .sheet(isPresented: $showApiDialog) {
             ApiConfigSheet(endpoint: $state.apiEndpoint)
+        }
+        .sheet(isPresented: $showModelDialog) {
+            ModelConfigSheet(model: $state.selectedModel)
         }
     }
 }
@@ -206,6 +212,40 @@ struct ApiConfigSheet: View {
             }
         }
         .onAppear { temp = endpoint }
+    }
+}
+
+struct ModelConfigSheet: View {
+    @Binding var model: String
+    @Environment(\.dismiss) var dismiss
+    @State private var temp = ""
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Model") {
+                    TextField("aether-local", text: $temp)
+                        .autocapitalization(.none)
+                        .textInputAutocapitalization(.never)
+                }
+            }
+            .navigationTitle("Model")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Save") {
+                        model = temp.trimmingCharacters(in: .whitespacesAndNewlines)
+                        dismiss()
+                    }
+                    .foregroundColor(AetherColors.oakMedium)
+                    .disabled(temp.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+        }
+        .onAppear { temp = model }
     }
 }
 
