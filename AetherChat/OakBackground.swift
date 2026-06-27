@@ -10,14 +10,17 @@ struct OakBackground<Content: View>: View {
 
     var body: some View {
         ZStack {
-            if colorScheme == .dark {
-                DarkOakCanvas()
-            } else {
-                LightOakCanvas()
+            Group {
+                if colorScheme == .dark {
+                    DarkOakCanvas()
+                } else {
+                    LightOakCanvas()
+                }
             }
+            .ignoresSafeArea()
+
             content
         }
-        .ignoresSafeArea()
     }
 }
 
