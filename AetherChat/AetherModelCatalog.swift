@@ -11,13 +11,15 @@ enum AetherModelCatalog {
     static let aetherV1DisplayName = "Aether V1"
     static let requestedGGUFRepository = "Jackrong/Qwen3.5-2B-Claude-4.6-Opus-Reasoning-Distilled-GGUF"
     static let requestedGGUFQuantization = "Q4_K_M"
+    static let aetherV1GGUFFilename = "Qwen3.5-2B.Q4_K_M.gguf"
+    static let aetherV1ContextTokens: Int32 = 4096
+    static let aetherV1MaxOutputTokens: Int32 = 512
 
-    // MLX Swift cannot load GGUF directly. Set this to a converted MLX repo when available.
-    static let defaultMLXRepository = UserDefaults.standard.string(forKey: "aetherV1MLXRepository") ?? ""
+    static let aetherV1DownloadURL = URL(
+        string: "https://huggingface.co/\(requestedGGUFRepository)/resolve/main/\(aetherV1GGUFFilename)"
+    )!
 
-    static var aetherV1NeedsConversionMessage: String {
-        """
-        Aether V1 is configured for \(requestedGGUFRepository):\(requestedGGUFQuantization), but that artifact is GGUF. MLX on iPhone needs an MLX-format repository. Convert or publish the model as MLX, then set its repo ID in Settings.
-        """
+    static var aetherV1RuntimeMessage: String {
+        "Aether V1 runs locally with llama.cpp using \(aetherV1GGUFFilename). The first on-device reply downloads about 1 GB, then caches the model on this iPhone."
     }
 }

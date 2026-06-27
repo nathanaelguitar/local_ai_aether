@@ -54,9 +54,6 @@ class AppState: ObservableObject {
     @Published var inferenceProvider: InferenceProvider = InferenceProvider(rawValue: UserDefaults.standard.string(forKey: "inferenceProvider") ?? "") ?? .onDevice {
         didSet { UserDefaults.standard.set(inferenceProvider.rawValue, forKey: "inferenceProvider") }
     }
-    @Published var aetherV1MLXRepository: String = AetherModelCatalog.defaultMLXRepository {
-        didSet { UserDefaults.standard.set(aetherV1MLXRepository, forKey: "aetherV1MLXRepository") }
-    }
     @Published var defaultWorkspace: Workspace = .personal
     private let backend = AetherBackendClient()
     private let onDevice = AetherOnDeviceClient()
@@ -86,8 +83,7 @@ class AppState: ObservableObject {
         do {
             let response = try await generateReply(
                 persona: persona,
-                messages: messageSnapshot,
-                latestText: text
+                messages: messageSnapshot
             )
             appendAssistantMessage(to: id, content: response)
         } catch {
@@ -95,13 +91,12 @@ class AppState: ObservableObject {
         }
     }
 
-    private func generateReply(persona: AssistantPersona, messages: [ChatMessage], latestText: String) async throws -> String {
+    private func generateReply(persona: AssistantPersona, messages: [ChatMessage]) async throws -> String {
         if inferenceProvider == .onDevice && selectedModel == AetherModelCatalog.aetherV1DisplayName {
             do {
                 return try await onDevice.send(
-                    modelRepository: aetherV1MLXRepository,
                     persona: persona,
-                    text: latestText
+                    messages: messages
                 )
             } catch {
                 let backendReply = try await backend.send(

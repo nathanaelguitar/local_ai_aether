@@ -71,11 +71,11 @@ struct SettingsView: View {
                                 }
                                 if state.selectedModel == AetherModelCatalog.aetherV1DisplayName {
                                     Divider().padding(.leading, 56)
-                                    SettingsNavRow(icon: "iphone.gen3", title: "Aether V1 MLX Repo",
-                                                   subtitle: state.aetherV1MLXRepository.isEmpty ? "Needs converted MLX repo" : state.aetherV1MLXRepository) {
+                                    SettingsNavRow(icon: "iphone.gen3", title: "Aether V1 Runtime",
+                                                   subtitle: AetherModelCatalog.aetherV1GGUFFilename) {
                                         showModelDialog = true
                                     }
-                                    Text(AetherModelCatalog.aetherV1NeedsConversionMessage)
+                                    Text(AetherModelCatalog.aetherV1RuntimeMessage)
                                         .font(.system(size: 12))
                                         .foregroundColor(AetherColors.warmGray500)
                                         .padding(.horizontal, 16)
@@ -130,7 +130,7 @@ struct SettingsView: View {
             ApiConfigSheet(endpoint: $state.apiEndpoint)
         }
         .sheet(isPresented: $showModelDialog) {
-            ModelConfigSheet(model: $state.selectedModel, mlxRepository: $state.aetherV1MLXRepository)
+            ModelConfigSheet(model: $state.selectedModel)
         }
     }
 }
@@ -237,10 +237,8 @@ struct ApiConfigSheet: View {
 
 struct ModelConfigSheet: View {
     @Binding var model: String
-    @Binding var mlxRepository: String
     @Environment(\.dismiss) var dismiss
     @State private var temp = ""
-    @State private var tempMLXRepository = ""
 
     var body: some View {
         NavigationStack {
@@ -254,10 +252,7 @@ struct ModelConfigSheet: View {
                     Button(AetherModelCatalog.aetherV1DisplayName) {
                         temp = AetherModelCatalog.aetherV1DisplayName
                     }
-                    TextField("Converted MLX repository", text: $tempMLXRepository)
-                        .autocapitalization(.none)
-                        .textInputAutocapitalization(.never)
-                    Text(AetherModelCatalog.aetherV1NeedsConversionMessage)
+                    Text(AetherModelCatalog.aetherV1RuntimeMessage)
                         .font(.system(size: 12))
                         .foregroundColor(AetherColors.warmGray500)
                 }
@@ -271,7 +266,6 @@ struct ModelConfigSheet: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Save") {
                         model = temp.trimmingCharacters(in: .whitespacesAndNewlines)
-                        mlxRepository = tempMLXRepository.trimmingCharacters(in: .whitespacesAndNewlines)
                         dismiss()
                     }
                     .foregroundColor(AetherColors.oakMedium)
@@ -281,7 +275,6 @@ struct ModelConfigSheet: View {
         }
         .onAppear {
             temp = model
-            tempMLXRepository = mlxRepository
         }
     }
 }
