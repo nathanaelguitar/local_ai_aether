@@ -114,6 +114,7 @@ class AppState: ObservableObject {
         didSet { UserDefaults.standard.set(inferenceProvider.rawValue, forKey: "inferenceProvider") }
     }
     @Published var modelLoadingMessage: String?
+    @Published var generationStatusMessage: String?
     @Published var appIsActive = true
     @Published var defaultWorkspace: Workspace = .personal
     private let backend = AetherBackendClient()
@@ -144,20 +145,30 @@ class AppState: ObservableObject {
         let task = AetherBackgroundTask.begin(name: "Aether V1 inference") { [weak self] in
             Task { @MainActor in
                 self?.modelLoadingMessage = nil
+                self?.generationStatusMessage = nil
             }
         }
         defer { AetherBackgroundTask.end(task) }
 
         do {
+            generationStatusMessage = messageSnapshot.contains(where: { !$0.attachments.isEmpty })
+                ? "Looking at the image and reading the conversation"
+                : "Reading the conversation"
             let response = try await generateReply(
                 persona: persona,
                 messages: messageSnapshot
             )
             modelLoadingMessage = nil
+            generationStatusMessage = nil
             appendAssistantMessage(to: id, content: response)
             notifyIfNeeded(conversationTitle: conversations.first(where: { $0.id == id })?.title ?? "Aether", response: response)
+        } catch is CancellationError {
+            modelLoadingMessage = nil
+            generationStatusMessage = nil
+            appendAssistantMessage(to: id, content: "Response stopped.")
         } catch {
             modelLoadingMessage = nil
+            generationStatusMessage = nil
             let errorMessage = "Inference error: \(inferenceErrorDescription(error))"
             appendAssistantMessage(to: id, content: errorMessage)
             notifyIfNeeded(conversationTitle: conversations.first(where: { $0.id == id })?.title ?? "Aether", response: errorMessage)
@@ -171,7 +182,12 @@ class AppState: ObservableObject {
                 messages: messages,
                 status: { [weak self] message in
                     await MainActor.run {
-                        self?.modelLoadingMessage = message
+                        if let message {
+                            self?.modelLoadingMessage = message
+                        } else {
+                            self?.modelLoadingMessage = nil
+                            self?.generationStatusMessage = "Composing a response"
+                        }
                     }
                 }
             )

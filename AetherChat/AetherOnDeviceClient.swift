@@ -13,9 +13,12 @@ actor AetherOnDeviceClient {
 
     func send(persona: AssistantPersona, messages: [ChatMessage], status: StatusHandler? = nil) async throws -> String {
         #if canImport(LlamaSwift)
+        try Task.checkCancellation()
         let modelFiles = try await AetherModelStore.localAetherV1Files(status: status)
+        try Task.checkCancellation()
         await status?("Loading Aether V1 into memory")
         let engine = try loadEngine(modelURL: modelFiles.modelURL, mmprojURL: modelFiles.mmprojURL)
+        try Task.checkCancellation()
         await status?(nil)
         let prompt = AetherPromptBuilder.prompt(persona: persona, messages: messages)
         let promptAttachments = messages.suffix(16).flatMap(\.attachments)
@@ -126,8 +129,13 @@ enum AetherModelStore {
         let temporaryURL: URL
         let response: URLResponse
         do {
+            try Task.checkCancellation()
             (temporaryURL, response) = try await URLSession.shared.download(from: remoteURL)
+            try Task.checkCancellation()
         } catch {
+            if error is CancellationError {
+                throw error
+            }
             throw AetherOnDeviceError.modelDownloadFailed(error.localizedDescription)
         }
         guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else {
@@ -235,6 +243,7 @@ final class AetherLlamaEngine {
     func generate(prompt: String, attachments: [ChatAttachment]) throws -> String {
         llama_memory_clear(llama_get_memory(context), true)
         if attachments.isEmpty {
+            try Task.checkCancellation()
             let promptTokens = try tokenize(prompt)
             guard !promptTokens.isEmpty, Int32(promptTokens.count) < contextTokens else {
                 throw AetherOnDeviceError.tokenizationFailed
@@ -259,6 +268,7 @@ final class AetherLlamaEngine {
         defer { llama_batch_free(batch) }
 
         for _ in 0..<AetherModelCatalog.aetherV1MaxOutputTokens {
+            try Task.checkCancellation()
             let next = try sampleGreedy()
             if next == llama_vocab_eos(vocab) || next == previousToken && generated.isEmpty {
                 break
@@ -284,6 +294,7 @@ final class AetherLlamaEngine {
     }
 
     private func decodeMultimodalPrompt(prompt: String, attachments: [ChatAttachment]) throws -> Int32 {
+        try Task.checkCancellation()
         let chunks = mtmd_input_chunks_init()
         guard let chunks else {
             throw AetherOnDeviceError.multimodalTokenizationFailed
@@ -310,6 +321,7 @@ final class AetherLlamaEngine {
             throw AetherOnDeviceError.multimodalTokenizationFailed
         }
 
+        try Task.checkCancellation()
         var nPast = llama_pos(0)
         guard mtmd_helper_eval_chunks(
             mtmdContext,
@@ -362,6 +374,7 @@ final class AetherLlamaEngine {
         let chunkSize = 512
         var cursor = 0
         while cursor < tokens.count {
+            try Task.checkCancellation()
             let end = min(cursor + chunkSize, tokens.count)
             try decode(
                 tokens: Array(tokens[cursor..<end]),
@@ -379,6 +392,7 @@ final class AetherLlamaEngine {
         startPosition: Int32,
         logitsForLastToken: Bool
     ) throws {
+        try Task.checkCancellation()
         batch.n_tokens = Int32(tokens.count)
         for (offset, token) in tokens.enumerated() {
             let index = Int(offset)

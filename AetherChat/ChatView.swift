@@ -11,6 +11,7 @@ struct ChatView: View {
     @State private var attachments: [ChatAttachment] = []
     @State private var selectedPhotoItem: PhotosPickerItem?
     @State private var showingCamera = false
+    @State private var sendTask: Task<Void, Never>?
     @FocusState private var inputFocused: Bool
 
     var conversation: Conversation? {
@@ -34,7 +35,7 @@ struct ChatView: View {
                                         .id(msg.id)
                                 }
                                 if isSending && state.modelLoadingMessage == nil {
-                                    TypingIndicator(isDark: state.isDarkTheme)
+                                    TypingIndicator(message: state.generationStatusMessage, isDark: state.isDarkTheme)
                                         .id("typing")
                                 }
                             }
@@ -71,7 +72,8 @@ struct ChatView: View {
                 isSending: isSending,
                 isDark: state.isDarkTheme,
                 focused: $inputFocused,
-                onCamera: { showingCamera = true }
+                onCamera: { showingCamera = true },
+                onStop: { stopSending() }
             ) {
                 send()
             }
@@ -119,10 +121,21 @@ struct ChatView: View {
         attachments = []
         inputFocused = false
         isSending = true
-        Task {
+        sendTask = Task {
             await state.sendMessage(in: conversationId, text: text, attachments: outgoingAttachments)
-            isSending = false
+            if !Task.isCancelled {
+                isSending = false
+                sendTask = nil
+            }
         }
+    }
+
+    func stopSending() {
+        sendTask?.cancel()
+        sendTask = nil
+        isSending = false
+        state.modelLoadingMessage = nil
+        state.generationStatusMessage = nil
     }
 
     private func normalizedJPEGData(from data: Data) -> Data? {
@@ -371,6 +384,7 @@ struct InputBar: View {
     let isDark: Bool
     var focused: FocusState<Bool>.Binding
     let onCamera: () -> Void
+    let onStop: () -> Void
     let onSend: () -> Void
 
     var canSend: Bool {
@@ -422,15 +436,15 @@ struct InputBar: View {
                     .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
                     .focused(focused)
 
-                Button(action: onSend) {
+                Button(action: isSending ? onStop : onSend) {
                     ZStack {
                         Circle()
-                            .fill(!canSend ? AetherColors.warmGray200 : AetherColors.oakMedium)
+                            .fill(!canSend && !isSending ? AetherColors.warmGray200 : AetherColors.oakMedium)
                             .frame(width: 44, height: 44)
                         if isSending {
-                            ProgressView()
-                                .tint(.white)
-                                .scaleEffect(0.8)
+                            Image(systemName: "stop.fill")
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundColor(.white)
                         } else {
                             Image(systemName: "arrow.up")
                                 .font(.system(size: 17, weight: .semibold))
@@ -438,7 +452,7 @@ struct InputBar: View {
                         }
                     }
                 }
-                .disabled(!canSend || isSending)
+                .disabled(!canSend && !isSending)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
@@ -451,29 +465,37 @@ struct InputBar: View {
 }
 
 struct TypingIndicator: View {
+    let message: String?
     let isDark: Bool
 
     var body: some View {
         HStack {
-            TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
-                let time = timeline.date.timeIntervalSinceReferenceDate
-                HStack(spacing: 6) {
-                    ForEach(0..<3, id: \.self) { index in
-                        let phase = time * 5.2 - Double(index) * 0.62
-                        let lift = max(0, sin(phase)) * -7
-                        Circle()
-                            .fill(isDark ? AetherColors.warmGray400 : AetherColors.warmGray500)
-                            .frame(width: 8, height: 8)
-                            .offset(y: lift)
-                            .scaleEffect(1 + max(0, sin(phase)) * 0.22)
-                            .opacity(0.62 + max(0, sin(phase)) * 0.38)
+            VStack(alignment: .leading, spacing: 7) {
+                if let message, !message.isEmpty {
+                    Text(message)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(isDark ? AetherColors.warmGray200 : AetherColors.warmGray600)
+                }
+                TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
+                    let time = timeline.date.timeIntervalSinceReferenceDate
+                    HStack(spacing: 6) {
+                        ForEach(0..<3, id: \.self) { index in
+                            let phase = time * 5.2 - Double(index) * 0.62
+                            let lift = max(0, sin(phase)) * -7
+                            Circle()
+                                .fill(isDark ? AetherColors.warmGray400 : AetherColors.warmGray500)
+                                .frame(width: 8, height: 8)
+                                .offset(y: lift)
+                                .scaleEffect(1 + max(0, sin(phase)) * 0.22)
+                                .opacity(0.62 + max(0, sin(phase)) * 0.38)
+                        }
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 14)
-                .background(isDark ? AetherColors.warmGray800 : Color.white)
-                .clipShape(Capsule())
             }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+            .background(isDark ? AetherColors.warmGray800 : Color.white)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             .padding(.leading, 16)
             Spacer()
         }
