@@ -21,7 +21,7 @@ actor AetherOnDeviceClient {
         try Task.checkCancellation()
         await status?(nil)
         let prompt = AetherPromptBuilder.prompt(persona: persona, messages: messages)
-        let promptAttachments = messages.suffix(16).flatMap(\.attachments).filter(\.isImage)
+        let promptAttachments = AetherPromptBuilder.promptMessages(from: messages).flatMap(\.attachments).filter(\.isImage)
         return try engine.generate(prompt: prompt, attachments: promptAttachments)
         #else
         throw AetherOnDeviceError.llamaUnavailable
@@ -170,12 +170,19 @@ enum AetherModelStore {
 }
 
 enum AetherPromptBuilder {
+    static func promptMessages(from messages: [ChatMessage]) -> [ChatMessage] {
+        let recent = messages.suffix(8).filter { message in
+            !message.content.hasPrefix("Inference error:")
+        }
+        return Array(recent)
+    }
+
     static func prompt(persona: AssistantPersona, messages: [ChatMessage]) -> String {
         var prompt = "<|im_start|>system\n"
         prompt += "You are \(persona.name), \(persona.description). Reply clearly and concisely. Do not expose hidden reasoning."
         prompt += "<|im_end|>\n"
 
-        for message in messages.suffix(16) {
+        for message in promptMessages(from: messages) {
             prompt += "<|im_start|>\(message.role.apiRole)\n"
             for _ in message.attachments.filter(\.isImage) {
                 prompt += "\(AetherPromptBuilder.mediaMarker)\n"
@@ -183,7 +190,7 @@ enum AetherPromptBuilder {
             for attachment in message.attachments where !attachment.isImage {
                 prompt += AetherPromptBuilder.fileContext(for: attachment)
             }
-            prompt += message.content
+            prompt += AetherPromptBuilder.content(for: message)
             prompt += "<|im_end|>\n"
         }
 
@@ -193,13 +200,22 @@ enum AetherPromptBuilder {
 
     private static let mediaMarker = "<__media__>"
 
+    private static func content(for message: ChatMessage) -> String {
+        let limit = message.role == .assistant ? 2_400 : 6_000
+        let text = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard text.count > limit else {
+            return text
+        }
+        return String(text.prefix(limit)) + "\n[Earlier content truncated to keep local inference in context.]"
+    }
+
     private static func fileContext(for attachment: ChatAttachment) -> String {
         guard let text = attachment.extractedText?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else {
             return "[Attached file: \(attachment.displayName), \(attachment.mimeType). The file could not be converted to text.]\n\n"
         }
         return """
         [Attached file: \(attachment.displayName)]
-        \(String(text.prefix(24_000)))
+        \(String(text.prefix(12_000)))
         [/Attached file]
 
         """
@@ -265,7 +281,8 @@ final class AetherLlamaEngine {
         if attachments.isEmpty {
             try Task.checkCancellation()
             let promptTokens = try tokenize(prompt)
-            guard !promptTokens.isEmpty, Int32(promptTokens.count) < contextTokens else {
+            let reservedOutput = min(AetherModelCatalog.aetherV1MaxOutputTokens, 512)
+            guard !promptTokens.isEmpty, Int32(promptTokens.count) < contextTokens - reservedOutput - 32 else {
                 throw AetherOnDeviceError.tokenizationFailed
             }
 
@@ -289,6 +306,9 @@ final class AetherLlamaEngine {
 
         for _ in 0..<AetherModelCatalog.aetherV1MaxOutputTokens {
             try Task.checkCancellation()
+            guard position < contextTokens - 1 else {
+                break
+            }
             let next = try sampleGreedy()
             if next == llama_vocab_eos(vocab) || next == previousToken && generated.isEmpty {
                 break
@@ -357,6 +377,10 @@ final class AetherLlamaEngine {
             throw AetherOnDeviceError.multimodalDecodeFailed(decodeResult)
         }
 
+        guard Int32(nPast) < contextTokens - AetherModelCatalog.aetherV1MaxOutputTokens - 32 else {
+            throw AetherOnDeviceError.tokenizationFailed
+        }
+
         return Int32(nPast)
     }
 
@@ -414,6 +438,11 @@ final class AetherLlamaEngine {
         logitsForLastToken: Bool
     ) throws {
         try Task.checkCancellation()
+        guard !tokens.isEmpty,
+              tokens.count <= Int(AetherModelCatalog.aetherV1BatchTokens),
+              startPosition + Int32(tokens.count) <= contextTokens else {
+            throw AetherOnDeviceError.tokenizationFailed
+        }
         batch.n_tokens = Int32(tokens.count)
         for (offset, token) in tokens.enumerated() {
             let index = Int(offset)
