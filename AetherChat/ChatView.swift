@@ -139,8 +139,7 @@ struct ChatView: View {
     }
 
     private func normalizedJPEGData(from data: Data) -> Data? {
-        guard let image = UIImage(data: data) else { return data }
-        return image.jpegData(compressionQuality: 0.82)
+        AetherImageNormalizer.jpegData(from: data)
     }
 }
 
@@ -277,16 +276,225 @@ struct MarkdownMessageText: View {
     }
 
     var body: some View {
-        Text(markdown)
-            .font(.system(size: 15))
-            .lineSpacing(4)
+        VStack(alignment: .leading, spacing: 9) {
+            ForEach(Array(MarkdownBlockParser.parse(content).enumerated()), id: \.offset) { _, block in
+                blockView(block)
+            }
+        }
+        .font(.system(size: 15))
     }
 
-    private var markdown: AttributedString {
-        (try? AttributedString(
-            markdown: content,
-            options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .full)
-        )) ?? AttributedString(content)
+    @ViewBuilder
+    private func blockView(_ block: MarkdownBlock) -> some View {
+        switch block {
+        case .heading(let level, let text):
+            inlineText(text)
+                .font(.system(size: headingSize(for: level), weight: .semibold))
+                .padding(.top, level == 1 ? 2 : 4)
+
+        case .paragraph(let text):
+            inlineText(text)
+                .lineSpacing(4)
+
+        case .bullet(let text):
+            HStack(alignment: .firstTextBaseline, spacing: 7) {
+                Text("•")
+                    .font(.system(size: 14, weight: .bold))
+                inlineText(text)
+                    .lineSpacing(3)
+            }
+
+        case .numbered(let number, let text):
+            HStack(alignment: .firstTextBaseline, spacing: 7) {
+                Text("\(number).")
+                    .font(.system(size: 14, weight: .semibold))
+                inlineText(text)
+                    .lineSpacing(3)
+            }
+
+        case .code(let code):
+            ScrollView(.horizontal, showsIndicators: false) {
+                Text(code)
+                    .font(.system(size: 13, design: .monospaced))
+                    .textSelection(.enabled)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .background(AetherColors.warmGray100.opacity(0.95))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+        case .table(let rows):
+            ScrollView(.horizontal, showsIndicators: false) {
+                Text(rows.joined(separator: "\n"))
+                    .font(.system(size: 13, design: .monospaced))
+                    .lineSpacing(3)
+                    .padding(10)
+            }
+            .background(AetherColors.warmGray100.opacity(0.95))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+    }
+
+    private func inlineText(_ text: String) -> Text {
+        let attributed = (try? AttributedString(
+            markdown: text,
+            options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        )) ?? AttributedString(text)
+        return Text(attributed)
+    }
+
+    private func headingSize(for level: Int) -> CGFloat {
+        switch level {
+        case 1: return 19
+        case 2: return 17
+        default: return 16
+        }
+    }
+}
+
+enum MarkdownBlock {
+    case heading(level: Int, text: String)
+    case paragraph(String)
+    case bullet(String)
+    case numbered(Int, String)
+    case code(String)
+    case table([String])
+}
+
+enum MarkdownBlockParser {
+    static func parse(_ content: String) -> [MarkdownBlock] {
+        let lines = content
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .components(separatedBy: "\n")
+        var blocks: [MarkdownBlock] = []
+        var index = 0
+
+        while index < lines.count {
+            let rawLine = lines[index]
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+
+            if line.isEmpty {
+                index += 1
+                continue
+            }
+
+            if line.hasPrefix("```") {
+                index += 1
+                var codeLines: [String] = []
+                while index < lines.count {
+                    let next = lines[index]
+                    if next.trimmingCharacters(in: .whitespaces).hasPrefix("```") {
+                        index += 1
+                        break
+                    }
+                    codeLines.append(next)
+                    index += 1
+                }
+                blocks.append(.code(codeLines.joined(separator: "\n")))
+                continue
+            }
+
+            if let heading = heading(from: line) {
+                blocks.append(.heading(level: heading.level, text: heading.text))
+                index += 1
+                continue
+            }
+
+            if let bullet = bullet(from: line) {
+                blocks.append(.bullet(bullet))
+                index += 1
+                continue
+            }
+
+            if let numbered = numbered(from: line) {
+                blocks.append(.numbered(numbered.number, numbered.text))
+                index += 1
+                continue
+            }
+
+            if line.hasPrefix("|"), line.hasSuffix("|") {
+                var rows: [String] = []
+                while index < lines.count {
+                    let tableLine = lines[index].trimmingCharacters(in: .whitespaces)
+                    guard tableLine.hasPrefix("|"), tableLine.hasSuffix("|") else { break }
+                    rows.append(tableLine)
+                    index += 1
+                }
+                blocks.append(.table(rows))
+                continue
+            }
+
+            var paragraphLines = [line]
+            index += 1
+            while index < lines.count {
+                let next = lines[index].trimmingCharacters(in: .whitespaces)
+                if next.isEmpty || next.hasPrefix("```") || heading(from: next) != nil || bullet(from: next) != nil || numbered(from: next) != nil || next.hasPrefix("|") {
+                    break
+                }
+                paragraphLines.append(next)
+                index += 1
+            }
+            blocks.append(.paragraph(paragraphLines.joined(separator: " ")))
+        }
+
+        return blocks.isEmpty ? [.paragraph(content)] : blocks
+    }
+
+    private static func heading(from line: String) -> (level: Int, text: String)? {
+        let level = line.prefix { $0 == "#" }.count
+        guard (1...6).contains(level),
+              line.dropFirst(level).first == " " else {
+            return nil
+        }
+        return (level, String(line.dropFirst(level + 1)))
+    }
+
+    private static func bullet(from line: String) -> String? {
+        guard line.hasPrefix("- ") || line.hasPrefix("* ") else { return nil }
+        return String(line.dropFirst(2))
+    }
+
+    private static func numbered(from line: String) -> (number: Int, text: String)? {
+        guard let dot = line.firstIndex(of: ".") else { return nil }
+        let numberText = String(line[..<dot])
+        guard let number = Int(numberText) else { return nil }
+        let rest = line[line.index(after: dot)...].trimmingCharacters(in: .whitespaces)
+        guard !rest.isEmpty else { return nil }
+        return (number, rest)
+    }
+}
+
+enum AetherImageNormalizer {
+    static let maxDimension: CGFloat = 768
+    static let compressionQuality: CGFloat = 0.76
+
+    static func jpegData(from data: Data) -> Data? {
+        guard let image = UIImage(data: data) else { return data }
+        return jpegData(from: image)
+    }
+
+    static func jpegData(from image: UIImage) -> Data? {
+        let size = resizedSize(for: image.size)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        let renderer = UIGraphicsImageRenderer(size: size, format: format)
+        let rendered = renderer.image { context in
+            UIColor.white.setFill()
+            context.fill(CGRect(origin: .zero, size: size))
+            image.draw(in: CGRect(origin: .zero, size: size))
+        }
+        return rendered.jpegData(compressionQuality: compressionQuality)
+    }
+
+    private static func resizedSize(for size: CGSize) -> CGSize {
+        let longest = max(size.width, size.height)
+        guard longest > maxDimension, longest > 0 else {
+            return CGSize(width: max(size.width, 1), height: max(size.height, 1))
+        }
+        let scale = maxDimension / longest
+        return CGSize(width: max(size.width * scale, 1), height: max(size.height * scale, 1))
     }
 }
 
@@ -371,7 +579,7 @@ struct CameraCaptureView: UIViewControllerRepresentable {
 
         func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
             let image = info[.editedImage] as? UIImage ?? info[.originalImage] as? UIImage
-            onComplete(image?.jpegData(compressionQuality: 0.82))
+            onComplete(image.flatMap { AetherImageNormalizer.jpegData(from: $0) })
         }
     }
 }

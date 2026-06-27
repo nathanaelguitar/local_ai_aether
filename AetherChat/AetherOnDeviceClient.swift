@@ -54,6 +54,7 @@ enum AetherOnDeviceError: LocalizedError {
     case projectorLoadFailed
     case imagePreprocessingFailed
     case multimodalTokenizationFailed
+    case multimodalDecodeFailed(Int32)
 
     var errorDescription: String? {
         switch self {
@@ -83,6 +84,8 @@ enum AetherOnDeviceError: LocalizedError {
             return "Aether V1 could not preprocess the attached image."
         case .multimodalTokenizationFailed:
             return "Aether V1 could not tokenize the multimodal prompt."
+        case .multimodalDecodeFailed(let code):
+            return "Aether V1 multimodal decode failed in llama.cpp with code \(code)."
         }
     }
 }
@@ -208,7 +211,7 @@ final class AetherLlamaEngine {
 
         var contextParams = llama_context_default_params()
         contextParams.n_ctx = UInt32(AetherModelCatalog.aetherV1ContextTokens)
-        contextParams.n_batch = 512
+        contextParams.n_batch = UInt32(AetherModelCatalog.aetherV1BatchTokens)
         contextParams.n_threads = max(2, min(6, Int32(ProcessInfo.processInfo.processorCount - 2)))
         contextParams.n_threads_batch = contextParams.n_threads
 
@@ -220,6 +223,8 @@ final class AetherLlamaEngine {
         var mtmdParams = mtmd_context_params_default()
         mtmdParams.use_gpu = true
         mtmdParams.n_threads = Int32(max(2, min(6, ProcessInfo.processInfo.processorCount - 2)))
+        mtmdParams.image_max_tokens = AetherModelCatalog.aetherV1ImageMaxTokens
+        mtmdParams.batch_max_tokens = AetherModelCatalog.aetherV1BatchTokens
         guard let mtmdContext = mtmd_init_from_file(mmprojURL.path, model, mtmdParams), mtmd_support_vision(mtmdContext) else {
             llama_free(context)
             llama_model_free(model)
@@ -249,7 +254,7 @@ final class AetherLlamaEngine {
                 throw AetherOnDeviceError.tokenizationFailed
             }
 
-            var batch = llama_batch_init(512, 0, 1)
+            var batch = llama_batch_init(AetherModelCatalog.aetherV1BatchTokens, 0, 1)
             defer { llama_batch_free(batch) }
 
             try decodePrompt(tokens: promptTokens, batch: &batch)
@@ -264,7 +269,7 @@ final class AetherLlamaEngine {
         var generated = ""
         var position = startPosition
         var previousToken = previousToken
-        var batch = llama_batch_init(512, 0, 1)
+        var batch = llama_batch_init(AetherModelCatalog.aetherV1BatchTokens, 0, 1)
         defer { llama_batch_free(batch) }
 
         for _ in 0..<AetherModelCatalog.aetherV1MaxOutputTokens {
@@ -323,17 +328,18 @@ final class AetherLlamaEngine {
 
         try Task.checkCancellation()
         var nPast = llama_pos(0)
-        guard mtmd_helper_eval_chunks(
+        let decodeResult = mtmd_helper_eval_chunks(
             mtmdContext,
             context,
             chunks,
             0,
             0,
-            512,
+            AetherModelCatalog.aetherV1BatchTokens,
             true,
             &nPast
-        ) == 0 else {
-            throw AetherOnDeviceError.decodeFailed
+        )
+        guard decodeResult == 0 else {
+            throw AetherOnDeviceError.multimodalDecodeFailed(decodeResult)
         }
 
         return Int32(nPast)
@@ -371,7 +377,7 @@ final class AetherLlamaEngine {
     }
 
     private func decodePrompt(tokens: [llama_token], batch: inout llama_batch) throws {
-        let chunkSize = 512
+        let chunkSize = Int(AetherModelCatalog.aetherV1BatchTokens)
         var cursor = 0
         while cursor < tokens.count {
             try Task.checkCancellation()
