@@ -7,6 +7,7 @@ import PDFKit
 struct ChatView: View {
     @EnvironmentObject var state: AppState
     let conversationId: UUID
+    let onNewChat: (() -> Void)?
 
     @State private var inputText = ""
     @State private var isSending = false
@@ -109,6 +110,16 @@ struct ChatView: View {
         }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                if let onNewChat {
+                    Button(action: onNewChat) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 16, weight: .semibold))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundColor(AetherColors.oakMedium)
+                }
+            }
             ToolbarItem(placement: .principal) {
                 Button {
                     titleDraft = conversation?.title ?? "Untitled"
@@ -265,35 +276,10 @@ struct MessageBubble: View {
     var body: some View {
         HStack(alignment: .bottom) {
             if isUser { Spacer(minLength: 60) }
-            VStack(alignment: isUser ? .trailing : .leading, spacing: 6) {
-                VStack(alignment: .leading, spacing: 10) {
-                    if !message.attachments.isEmpty {
-                        ForEach(message.attachments) { attachment in
-                            MessageAttachmentThumbnail(attachment: attachment, isDark: isDark)
-                        }
-                    }
 
-                    if !message.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        if isUser {
-                            Text(message.content)
-                                .font(.system(size: 15))
-                                .foregroundColor(isDark ? AetherColors.warmGray200 : AetherColors.warmBlack)
-                        } else {
-                            MarkdownMessageText(message.content, isDark: isDark)
-                                .foregroundColor(isDark ? AetherColors.warmGray200 : AetherColors.warmBlack)
-                        }
-                    }
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                .background(bubbleColor)
-                .clipShape(
-                    RoundedCornerShape(
-                        topLeft: 20, topRight: 20,
-                        bottomLeft: isUser ? 20 : 4,
-                        bottomRight: isUser ? 4 : 20
-                    )
-                )
+            VStack(alignment: .leading, spacing: 8) {
+                messageContent
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
                 if !isUser && !message.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     Button {
@@ -312,18 +298,47 @@ struct MessageBubble: View {
                             .clipShape(Circle())
                     }
                     .buttonStyle(.plain)
-                    .padding(.leading, 6)
+                    .padding(.leading, 2)
                 }
             }
+
             if !isUser { Spacer(minLength: 60) }
         }
         .padding(.horizontal, 16)
         .textSelection(.enabled)
     }
 
-    var bubbleColor: Color {
-        if isUser { return isDark ? AetherColors.oakMedium : AetherColors.oakMedium.opacity(0.85) }
-        return isDark ? AetherColors.warmGray800 : Color.white
+    @ViewBuilder
+    private var messageContent: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if !message.attachments.isEmpty {
+                ForEach(message.attachments) { attachment in
+                    MessageAttachmentThumbnail(attachment: attachment, isDark: isDark)
+                }
+            }
+
+            if !message.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                if isUser {
+                    Text(message.content)
+                        .font(.system(size: 15))
+                        .foregroundColor(.white)
+                } else {
+                    MarkdownMessageText(message.content, isDark: isDark)
+                        .foregroundColor(isDark ? AetherColors.warmGray100 : AetherColors.warmBlack)
+                }
+            }
+        }
+        .padding(.horizontal, isUser ? 16 : 2)
+        .padding(.vertical, isUser ? 12 : 4)
+        .background(isUser ? (isDark ? AetherColors.oakMedium : AetherColors.oakMedium.opacity(0.92)) : Color.clear)
+        .clipShape(
+            RoundedCornerShape(
+                topLeft: 20, topRight: 20,
+                bottomLeft: isUser ? 20 : 4,
+                bottomRight: isUser ? 4 : 20
+            )
+        )
+        .frame(maxWidth: isUser ? 320 : .infinity, alignment: isUser ? .trailing : .leading)
     }
 }
 
