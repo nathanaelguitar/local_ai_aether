@@ -49,7 +49,12 @@ class AppState: ObservableObject {
         didSet { UserDefaults.standard.set(apiEndpoint, forKey: "apiEndpoint") }
     }
     @Published var selectedModel: String = UserDefaults.standard.string(forKey: "selectedModel") ?? AetherModelCatalog.aetherV1DisplayName {
-        didSet { UserDefaults.standard.set(selectedModel, forKey: "selectedModel") }
+        didSet {
+            UserDefaults.standard.set(selectedModel, forKey: "selectedModel")
+            if selectedModel == AetherModelCatalog.aetherV1DisplayName {
+                inferenceProvider = .onDevice
+            }
+        }
     }
     @Published var inferenceProvider: InferenceProvider = InferenceProvider(rawValue: UserDefaults.standard.string(forKey: "inferenceProvider") ?? "") ?? .onDevice {
         didSet { UserDefaults.standard.set(inferenceProvider.rawValue, forKey: "inferenceProvider") }
@@ -92,21 +97,15 @@ class AppState: ObservableObject {
     }
 
     private func generateReply(persona: AssistantPersona, messages: [ChatMessage]) async throws -> String {
-        if inferenceProvider == .onDevice && selectedModel == AetherModelCatalog.aetherV1DisplayName {
-            do {
-                return try await onDevice.send(
-                    persona: persona,
-                    messages: messages
-                )
-            } catch {
-                let backendReply = try await backend.send(
-                    endpoint: apiEndpoint,
-                    model: selectedModel,
-                    persona: persona,
-                    messages: messages
-                )
-                return "\(error.localizedDescription)\n\nBackend fallback replied:\n\(backendReply)"
-            }
+        if selectedModel == AetherModelCatalog.aetherV1DisplayName {
+            return try await onDevice.send(
+                persona: persona,
+                messages: messages
+            )
+        }
+
+        if inferenceProvider == .onDevice {
+            throw AetherOnDeviceError.unsupportedLocalModel(selectedModel)
         }
 
         return try await backend.send(

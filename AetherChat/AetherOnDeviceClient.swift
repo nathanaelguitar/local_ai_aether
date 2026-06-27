@@ -41,6 +41,7 @@ enum AetherOnDeviceError: LocalizedError {
     case tokenizationFailed
     case decodeFailed
     case emptyResponse
+    case unsupportedLocalModel(String)
 
     var errorDescription: String? {
         switch self {
@@ -60,6 +61,8 @@ enum AetherOnDeviceError: LocalizedError {
             return "Aether V1 local inference failed while decoding."
         case .emptyResponse:
             return "Aether V1 generated an empty response."
+        case .unsupportedLocalModel(let model):
+            return "\(model) is not available for on-device inference. Select Aether V1 or switch the provider to Backend."
         }
     }
 }
@@ -157,6 +160,8 @@ final class AetherLlamaEngine {
     }
 
     func generate(prompt: String) throws -> String {
+        llama_memory_clear(llama_get_memory(context), true)
+
         let promptTokens = try tokenize(prompt)
         guard !promptTokens.isEmpty, Int32(promptTokens.count) < contextTokens else {
             throw AetherOnDeviceError.tokenizationFailed
