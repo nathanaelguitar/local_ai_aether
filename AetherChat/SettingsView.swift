@@ -3,10 +3,6 @@ import SwiftUI
 struct SettingsView: View {
     @EnvironmentObject var state: AppState
     @Environment(\.dismiss) var dismiss
-    @State private var showApiDialog = false
-    @State private var showModelDialog = false
-    @State private var tempEndpoint = ""
-    @State private var tempModel = ""
 
     var body: some View {
         NavigationStack {
@@ -52,35 +48,9 @@ struct SettingsView: View {
                         // AI config
                         SettingsSection(title: "AI Configuration") {
                             VStack(spacing: 0) {
-                                Picker("Provider", selection: $state.inferenceProvider) {
-                                    ForEach(InferenceProvider.allCases) { provider in
-                                        Text(provider.rawValue).tag(provider)
-                                    }
-                                }
-                                .pickerStyle(.segmented)
-                                .padding(12)
+                                SettingsInfoRow(icon: "cpu", title: "Model", subtitle: AetherModelCatalog.aetherV1DisplayName)
                                 Divider().padding(.leading, 56)
-                                SettingsNavRow(icon: "network", title: "API Endpoint",
-                                               subtitle: state.apiEndpoint.isEmpty ? "Not configured" : state.apiEndpoint) {
-                                    showApiDialog = true
-                                }
-                                Divider().padding(.leading, 56)
-                                SettingsNavRow(icon: "cpu", title: "Model",
-                                               subtitle: state.selectedModel) {
-                                    showModelDialog = true
-                                }
-                                if state.selectedModel == AetherModelCatalog.aetherV1DisplayName {
-                                    Divider().padding(.leading, 56)
-                                    SettingsNavRow(icon: "iphone.gen3", title: "Aether V1 Runtime",
-                                                   subtitle: AetherModelCatalog.aetherV1GGUFFilename) {
-                                        showModelDialog = true
-                                    }
-                                    Text(AetherModelCatalog.aetherV1RuntimeMessage)
-                                        .font(.system(size: 12))
-                                        .foregroundColor(AetherColors.warmGray500)
-                                        .padding(.horizontal, 16)
-                                        .padding(.bottom, 12)
-                                }
+                                SettingsInfoRow(icon: "iphone.gen3", title: "Inference", subtitle: "On device")
                             }
                             .background(Color(UIColor.secondarySystemBackground))
                             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -126,11 +96,9 @@ struct SettingsView: View {
             }
         }
         .preferredColorScheme(state.isDarkTheme ? .dark : .light)
-        .sheet(isPresented: $showApiDialog) {
-            ApiConfigSheet(endpoint: $state.apiEndpoint)
-        }
-        .sheet(isPresented: $showModelDialog) {
-            ModelConfigSheet(model: $state.selectedModel)
+        .onAppear {
+            state.inferenceProvider = .onDevice
+            state.selectedModel = AetherModelCatalog.aetherV1DisplayName
         }
     }
 }
@@ -202,6 +170,34 @@ struct SettingsNavRow: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
         }
+    }
+}
+
+struct SettingsInfoRow: View {
+    let icon: String
+    let title: String
+    let subtitle: String
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Image(systemName: icon)
+                .frame(width: 28)
+                .foregroundColor(AetherColors.oakMedium)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundColor(.primary)
+                Text(subtitle)
+                    .font(.system(size: 12))
+                    .foregroundColor(AetherColors.warmGray500)
+            }
+            Spacer()
+            Image(systemName: "checkmark.seal.fill")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundColor(AetherColors.oakMedium)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
     }
 }
 

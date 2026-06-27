@@ -313,25 +313,10 @@ struct MarkdownMessageText: View {
             }
 
         case .code(let code):
-            ScrollView(.horizontal, showsIndicators: false) {
-                Text(code)
-                    .font(.system(size: 13, design: .monospaced))
-                    .textSelection(.enabled)
-                    .padding(10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .background(AetherColors.warmGray100.opacity(0.95))
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            CodeBlockView(code: code)
 
         case .table(let rows):
-            ScrollView(.horizontal, showsIndicators: false) {
-                Text(rows.joined(separator: "\n"))
-                    .font(.system(size: 13, design: .monospaced))
-                    .lineSpacing(3)
-                    .padding(10)
-            }
-            .background(AetherColors.warmGray100.opacity(0.95))
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            CodeBlockView(code: rows.joined(separator: "\n"))
         }
     }
 
@@ -348,6 +333,44 @@ struct MarkdownMessageText: View {
         case 1: return 19
         case 2: return 17
         default: return 16
+        }
+    }
+}
+
+struct CodeBlockView: View {
+    let code: String
+
+    var body: some View {
+        VStack(spacing: 7) {
+            ScrollView(.horizontal, showsIndicators: true) {
+                Text(code)
+                    .font(.system(size: 13, design: .monospaced))
+                    .lineSpacing(3)
+                    .textSelection(.enabled)
+                    .padding(12)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+            .scrollIndicators(.visible)
+            .background(AetherColors.warmGray100.opacity(0.95))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+            HStack(spacing: 6) {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 8, weight: .bold))
+                Capsule()
+                    .fill(AetherColors.oakMedium.opacity(0.28))
+                    .frame(height: 4)
+                    .overlay(alignment: .leading) {
+                        Capsule()
+                            .fill(AetherColors.oakMedium.opacity(0.78))
+                            .frame(width: 42, height: 4)
+                    }
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 8, weight: .bold))
+            }
+            .foregroundColor(AetherColors.oakMedium.opacity(0.72))
+            .padding(.horizontal, 10)
+            .accessibilityHidden(true)
         }
     }
 }
