@@ -270,6 +270,8 @@ struct MessageBubble: View {
     let message: ChatMessage
     let isDark: Bool
     @State private var copiedMessage = false
+    @State private var shareText = ""
+    @State private var showingShareSheet = false
 
     var isUser: Bool { message.role == .user }
 
@@ -282,22 +284,37 @@ struct MessageBubble: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                 if !isUser && !message.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Button {
-                        UIPasteboard.general.string = message.content
-                        copiedMessage = true
-                        Task {
-                            try? await Task.sleep(nanoseconds: 1_200_000_000)
-                            copiedMessage = false
+                    HStack(spacing: 8) {
+                        Button {
+                            UIPasteboard.general.string = message.content
+                            copiedMessage = true
+                            Task {
+                                try? await Task.sleep(nanoseconds: 1_200_000_000)
+                                copiedMessage = false
+                            }
+                        } label: {
+                            Image(systemName: copiedMessage ? "checkmark" : "doc.on.doc")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(AetherColors.oakMedium)
+                                .frame(width: 28, height: 28)
+                                .background((isDark ? AetherColors.warmGray800 : Color.white).opacity(0.82))
+                                .clipShape(Circle())
                         }
-                    } label: {
-                        Image(systemName: copiedMessage ? "checkmark" : "doc.on.doc")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(AetherColors.oakMedium)
-                            .frame(width: 28, height: 28)
-                            .background((isDark ? AetherColors.warmGray800 : Color.white).opacity(0.82))
-                            .clipShape(Circle())
+                        .buttonStyle(.plain)
+
+                        Button {
+                            shareText = message.content
+                            showingShareSheet = true
+                        } label: {
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(AetherColors.oakMedium)
+                                .frame(width: 28, height: 28)
+                                .background((isDark ? AetherColors.warmGray800 : Color.white).opacity(0.82))
+                                .clipShape(Circle())
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                     .padding(.leading, 2)
                 }
             }
@@ -306,6 +323,9 @@ struct MessageBubble: View {
         }
         .padding(.horizontal, 16)
         .textSelection(.enabled)
+        .sheet(isPresented: $showingShareSheet) {
+            ActivityView(items: [shareText])
+        }
     }
 
     @ViewBuilder
@@ -458,6 +478,16 @@ struct CodeBlockView: View {
                 .stroke(isDark ? AetherColors.oakMedium.opacity(0.24) : Color.clear, lineWidth: 1)
         )
     }
+}
+
+struct ActivityView: UIViewControllerRepresentable {
+    let items: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
 
 enum ChatAttachmentLoader {

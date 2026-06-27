@@ -24,15 +24,6 @@ struct ConversationListView: View {
                             .font(.system(size: 28, weight: .light, design: .serif))
                             .foregroundColor(AetherColors.oakDark)
                         Spacer()
-                        Button(action: { showNewChat = true }) {
-                            Image(systemName: "plus")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundColor(AetherColors.oakMedium)
-                                .frame(width: 36, height: 36)
-                                .background(AetherColors.oakMedium.opacity(0.12))
-                                .clipShape(Circle())
-                        }
-                        .buttonStyle(.plain)
                         Button(action: { showSettings = true }) {
                             Image(systemName: "gearshape.fill")
                                 .font(.system(size: 20))
@@ -87,6 +78,31 @@ struct ConversationListView: View {
                             }
                         }
                         .padding(.horizontal, 16)
+                        .padding(.bottom, 110)
+                    }
+                }
+
+                VStack {
+                    Spacer()
+                    HStack {
+                        Spacer()
+                        Button(action: { showNewChat = true }) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "plus")
+                                    .font(.system(size: 16, weight: .semibold))
+                                Text("New Chat")
+                                    .font(.system(size: 15, weight: .semibold))
+                            }
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 14)
+                            .background(AetherColors.oakMedium)
+                            .clipShape(Capsule())
+                            .shadow(color: AetherColors.oakDark.opacity(0.3), radius: 8, y: 4)
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.trailing, 20)
+                        .padding(.bottom, 36)
                     }
                 }
             }
