@@ -34,6 +34,11 @@ struct ChatView: View {
                         }
                         .padding(.vertical, 16)
                     }
+                    .scrollDismissesKeyboard(.interactively)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        inputFocused = false
+                    }
                     .onChange(of: conversation?.messages.count) {
                         if let last = conversation?.messages.last {
                             withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
@@ -43,11 +48,11 @@ struct ChatView: View {
                         if isSending { withAnimation { proxy.scrollTo("typing", anchor: .bottom) } }
                     }
                 }
-
-                // Input bar
-                InputBar(text: $inputText, isSending: isSending, isDark: state.isDarkTheme, focused: $inputFocused) {
-                    send()
-                }
+            }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            InputBar(text: $inputText, isSending: isSending, isDark: state.isDarkTheme, focused: $inputFocused) {
+                send()
             }
         }
         .navigationBarTitleDisplayMode(.inline)
@@ -71,6 +76,7 @@ struct ChatView: View {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !isSending else { return }
         inputText = ""
+        inputFocused = false
         isSending = true
         Task {
             await state.sendMessage(in: conversationId, text: text)
@@ -150,6 +156,19 @@ struct InputBar: View {
 
     var body: some View {
         HStack(spacing: 12) {
+            if focused.wrappedValue {
+                Button {
+                    focused.wrappedValue = false
+                } label: {
+                    Image(systemName: "keyboard.chevron.compact.down")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundColor(AetherColors.oakMedium)
+                        .frame(width: 34, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .transition(.move(edge: .leading).combined(with: .opacity))
+            }
+
             TextField("Message your assistant...", text: $text, axis: .vertical)
                 .font(.system(size: 15))
                 .lineLimit(1...5)
@@ -182,6 +201,7 @@ struct InputBar: View {
         .padding(.vertical, 10)
         .background(isDark ? AetherColors.warmGray900 : Color.white)
         .shadow(color: .black.opacity(0.08), radius: 12, y: -2)
+        .animation(.easeInOut(duration: 0.18), value: focused.wrappedValue)
     }
 }
 
