@@ -144,7 +144,14 @@ class AppState: ObservableObject {
     }
 
     func createConversation(title: String, workspace: Workspace, persona: AssistantPersona) {
-        conversations.insert(Conversation(title: title, workspace: workspace, persona: persona), at: 0)
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        conversations.insert(Conversation(title: trimmed.isEmpty ? "Untitled" : trimmed, workspace: workspace, persona: persona), at: 0)
+    }
+
+    func renameConversation(_ id: UUID, title: String) {
+        guard let idx = conversations.firstIndex(where: { $0.id == id }) else { return }
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        conversations[idx].title = trimmed.isEmpty ? "Untitled" : trimmed
     }
 
     func sendMessage(in id: UUID, text: String, attachments: [ChatAttachment] = []) async {
@@ -152,6 +159,9 @@ class AppState: ObservableObject {
         let userMsg = ChatMessage(role: .user, content: text, attachments: attachments)
         conversations[idx].messages.append(userMsg)
         conversations[idx].previewText = text.isEmpty ? attachmentPreview(for: attachments) : text
+        if conversations[idx].title == "Untitled" {
+            conversations[idx].title = AetherTitleGenerator.title(for: text, attachments: attachments)
+        }
         conversations[idx].updatedAt = Date()
 
         let persona = conversations[idx].persona
@@ -262,6 +272,33 @@ class AppState: ObservableObject {
         default:
             return "\(imageCount) image\(imageCount == 1 ? "" : "s"), \(fileCount) file\(fileCount == 1 ? "" : "s")"
         }
+    }
+}
+
+enum AetherTitleGenerator {
+    static func title(for text: String, attachments: [ChatAttachment]) -> String {
+        let cleaned = text
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let source: String
+        if cleaned.isEmpty, let first = attachments.first {
+            source = first.isImage ? "Image Analysis" : first.displayName
+        } else {
+            source = cleaned
+        }
+
+        let stopwords: Set<String> = ["a", "an", "and", "are", "can", "do", "for", "how", "i", "in", "is", "it", "me", "of", "on", "or", "the", "to", "what", "with", "you"]
+        let words = source
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+            .filter { !stopwords.contains($0.lowercased()) }
+            .prefix(5)
+
+        let title = words.map { word in
+            word.prefix(1).uppercased() + word.dropFirst()
+        }.joined(separator: " ")
+
+        return title.isEmpty ? "Untitled" : String(title.prefix(42))
     }
 }
 

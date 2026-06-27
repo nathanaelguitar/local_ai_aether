@@ -328,7 +328,6 @@ struct NewChatSheet: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Create") { onCreate(title, workspace, persona) }
                         .foregroundColor(AetherColors.oakMedium)
-                        .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
         }

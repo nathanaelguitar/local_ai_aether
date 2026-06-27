@@ -14,6 +14,8 @@ struct ChatView: View {
     @State private var selectedPhotoItem: PhotosPickerItem?
     @State private var showingCamera = false
     @State private var showingFileImporter = false
+    @State private var showingRenameDialog = false
+    @State private var titleDraft = ""
     @State private var sendTask: Task<Void, Never>?
     @FocusState private var inputFocused: Bool
 
@@ -106,7 +108,11 @@ struct ChatView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) {
-                VStack(spacing: 0) {
+                Button {
+                    titleDraft = conversation?.title ?? "Untitled"
+                    showingRenameDialog = true
+                } label: {
+                    VStack(spacing: 0) {
                     Text(conversation?.title ?? "Chat")
                         .font(.system(size: 16, weight: .semibold))
                     if let persona = conversation?.persona {
@@ -114,8 +120,19 @@ struct ChatView: View {
                             .font(.system(size: 11))
                             .foregroundColor(AetherColors.oakMedium)
                     }
+                    }
                 }
+                .buttonStyle(.plain)
             }
+        }
+        .alert("Rename Conversation", isPresented: $showingRenameDialog) {
+            TextField("Conversation title", text: $titleDraft)
+            Button("Cancel", role: .cancel) {}
+            Button("Save") {
+                state.renameConversation(conversationId, title: titleDraft)
+            }
+        } message: {
+            Text("Leave it blank to keep it as Untitled.")
         }
         .preferredColorScheme(state.isDarkTheme ? .dark : .light)
     }
@@ -285,13 +302,12 @@ struct MessageBubble: View {
                             copiedMessage = false
                         }
                     } label: {
-                        Label(copiedMessage ? "Copied" : "Copy", systemImage: copiedMessage ? "checkmark" : "doc.on.doc")
-                            .font(.system(size: 11, weight: .semibold))
+                        Image(systemName: copiedMessage ? "checkmark" : "doc.on.doc")
+                            .font(.system(size: 12, weight: .semibold))
                             .foregroundColor(AetherColors.oakMedium)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 5)
+                            .frame(width: 28, height: 28)
                             .background((isDark ? AetherColors.warmGray800 : Color.white).opacity(0.82))
-                            .clipShape(Capsule())
+                            .clipShape(Circle())
                     }
                     .buttonStyle(.plain)
                     .padding(.leading, 6)
@@ -408,13 +424,12 @@ struct CodeBlockView: View {
                     copied = false
                 }
             } label: {
-                Label(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc")
-                    .font(.system(size: 10, weight: .semibold))
+                Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(isDark ? AetherColors.oakPale : AetherColors.oakMedium)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-                    .background(isDark ? AetherColors.warmGray800.opacity(0.9) : Color.white.opacity(0.88))
-                    .clipShape(Capsule())
+                    .frame(width: 28, height: 28)
+                    .background(isDark ? AetherColors.warmGray800.opacity(0.9) : Color.white.opacity(0.9))
+                    .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
             }
             .buttonStyle(.plain)
             .padding(8)
