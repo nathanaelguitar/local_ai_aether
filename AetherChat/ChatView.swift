@@ -1,6 +1,8 @@
 import SwiftUI
 import PhotosUI
 import UIKit
+import UniformTypeIdentifiers
+import PDFKit
 
 struct ChatView: View {
     @EnvironmentObject var state: AppState
@@ -11,6 +13,7 @@ struct ChatView: View {
     @State private var attachments: [ChatAttachment] = []
     @State private var selectedPhotoItem: PhotosPickerItem?
     @State private var showingCamera = false
+    @State private var showingFileImporter = false
     @State private var sendTask: Task<Void, Never>?
     @FocusState private var inputFocused: Bool
 
@@ -72,6 +75,7 @@ struct ChatView: View {
                 isSending: isSending,
                 isDark: state.isDarkTheme,
                 focused: $inputFocused,
+                onFile: { showingFileImporter = true },
                 onCamera: { showingCamera = true },
                 onStop: { stopSending() }
             ) {
@@ -95,6 +99,9 @@ struct ChatView: View {
                 }
                 selectedPhotoItem = nil
             }
+        }
+        .fileImporter(isPresented: $showingFileImporter, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
+            Task { await importFiles(result) }
         }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -140,6 +147,16 @@ struct ChatView: View {
 
     private func normalizedJPEGData(from data: Data) -> Data? {
         AetherImageNormalizer.jpegData(from: data)
+    }
+
+    @MainActor
+    private func importFiles(_ result: Result<[URL], Error>) async {
+        guard case .success(let urls) = result else { return }
+        for url in urls.prefix(6) {
+            if let attachment = ChatAttachmentLoader.attachment(from: url) {
+                attachments.append(attachment)
+            }
+        }
     }
 }
 
@@ -222,40 +239,64 @@ struct ModelLoadingOverlay: View {
 struct MessageBubble: View {
     let message: ChatMessage
     let isDark: Bool
+    @State private var copiedMessage = false
 
     var isUser: Bool { message.role == .user }
 
     var body: some View {
         HStack(alignment: .bottom) {
             if isUser { Spacer(minLength: 60) }
-            VStack(alignment: .leading, spacing: 10) {
-                if !message.attachments.isEmpty {
-                    ForEach(message.attachments) { attachment in
-                        MessageAttachmentThumbnail(attachment: attachment)
+            VStack(alignment: isUser ? .trailing : .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 10) {
+                    if !message.attachments.isEmpty {
+                        ForEach(message.attachments) { attachment in
+                            MessageAttachmentThumbnail(attachment: attachment, isDark: isDark)
+                        }
+                    }
+
+                    if !message.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        if isUser {
+                            Text(message.content)
+                                .font(.system(size: 15))
+                                .foregroundColor(isDark ? AetherColors.warmGray200 : AetherColors.warmBlack)
+                        } else {
+                            MarkdownMessageText(message.content, isDark: isDark)
+                                .foregroundColor(isDark ? AetherColors.warmGray200 : AetherColors.warmBlack)
+                        }
                     }
                 }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(bubbleColor)
+                .clipShape(
+                    RoundedCornerShape(
+                        topLeft: 20, topRight: 20,
+                        bottomLeft: isUser ? 20 : 4,
+                        bottomRight: isUser ? 4 : 20
+                    )
+                )
 
-                if !message.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    if isUser {
-                        Text(message.content)
-                            .font(.system(size: 15))
-                            .foregroundColor(isDark ? AetherColors.warmGray200 : AetherColors.warmBlack)
-                    } else {
-                        MarkdownMessageText(message.content, isDark: isDark)
-                            .foregroundColor(isDark ? AetherColors.warmGray200 : AetherColors.warmBlack)
+                if !isUser && !message.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Button {
+                        UIPasteboard.general.string = message.content
+                        copiedMessage = true
+                        Task {
+                            try? await Task.sleep(nanoseconds: 1_200_000_000)
+                            copiedMessage = false
+                        }
+                    } label: {
+                        Label(copiedMessage ? "Copied" : "Copy", systemImage: copiedMessage ? "checkmark" : "doc.on.doc")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(AetherColors.oakMedium)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background((isDark ? AetherColors.warmGray800 : Color.white).opacity(0.82))
+                            .clipShape(Capsule())
                     }
+                    .buttonStyle(.plain)
+                    .padding(.leading, 6)
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .background(bubbleColor)
-            .clipShape(
-                RoundedCornerShape(
-                    topLeft: 20, topRight: 20,
-                    bottomLeft: isUser ? 20 : 4,
-                    bottomRight: isUser ? 4 : 20
-                )
-            )
             if !isUser { Spacer(minLength: 60) }
         }
         .padding(.horizontal, 16)
@@ -342,19 +383,42 @@ struct MarkdownMessageText: View {
 struct CodeBlockView: View {
     let code: String
     let isDark: Bool
+    @State private var copied = false
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: true) {
-            Text(code)
-                .font(.system(size: 13, design: .monospaced))
-                .foregroundColor(isDark ? AetherColors.warmGray100 : AetherColors.warmBlack)
-                .lineSpacing(3)
-                .textSelection(.enabled)
-                .padding(12)
-                .padding(.bottom, 6)
-                .fixedSize(horizontal: true, vertical: false)
+        ZStack(alignment: .topTrailing) {
+            ScrollView(.horizontal, showsIndicators: true) {
+                Text(code)
+                    .font(.system(size: 13, design: .monospaced))
+                    .foregroundColor(isDark ? AetherColors.warmGray100 : AetherColors.warmBlack)
+                    .lineSpacing(3)
+                    .textSelection(.enabled)
+                    .padding(12)
+                    .padding(.top, 22)
+                    .padding(.bottom, 6)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+            .scrollIndicators(.visible)
+
+            Button {
+                UIPasteboard.general.string = code
+                copied = true
+                Task {
+                    try? await Task.sleep(nanoseconds: 1_200_000_000)
+                    copied = false
+                }
+            } label: {
+                Label(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(isDark ? AetherColors.oakPale : AetherColors.oakMedium)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(isDark ? AetherColors.warmGray800.opacity(0.9) : Color.white.opacity(0.88))
+                    .clipShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .padding(8)
         }
-        .scrollIndicators(.visible)
         .background(isDark ? AetherColors.warmGray900.opacity(0.92) : AetherColors.warmGray100.opacity(0.95))
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(
@@ -362,6 +426,65 @@ struct CodeBlockView: View {
                 .stroke(isDark ? AetherColors.oakMedium.opacity(0.24) : Color.clear, lineWidth: 1)
         )
     }
+}
+
+enum ChatAttachmentLoader {
+    static let maxExtractedCharacters = 80_000
+
+    static func attachment(from url: URL) -> ChatAttachment? {
+        let hasAccess = url.startAccessingSecurityScopedResource()
+        defer {
+            if hasAccess {
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        let filename = url.lastPathComponent
+        let mimeType = mimeType(for: url)
+
+        if mimeType.hasPrefix("image/"), let normalized = AetherImageNormalizer.jpegData(from: data) {
+            return ChatAttachment(data: normalized, mimeType: "image/jpeg", filename: filename)
+        }
+
+        let text = extractedText(from: data, url: url, mimeType: mimeType)
+        return ChatAttachment(
+            data: data,
+            mimeType: mimeType,
+            filename: filename,
+            extractedText: text.map { String($0.prefix(maxExtractedCharacters)) }
+        )
+    }
+
+    private static func mimeType(for url: URL) -> String {
+        if let type = try? url.resourceValues(forKeys: [.contentTypeKey]).contentType,
+           let mimeType = type.preferredMIMEType {
+            return mimeType
+        }
+        return "application/octet-stream"
+    }
+
+    private static func extractedText(from data: Data, url: URL, mimeType: String) -> String? {
+        if mimeType == "application/pdf", let document = PDFDocument(data: data) {
+            let pages = (0..<document.pageCount).compactMap { document.page(at: $0)?.string }
+            return pages.joined(separator: "\n\n")
+        }
+
+        if mimeType.hasPrefix("text/") || textLikeExtensions.contains(url.pathExtension.lowercased()) {
+            return String(data: data, encoding: .utf8)
+                ?? String(data: data, encoding: .utf16)
+                ?? String(data: data, encoding: .ascii)
+        }
+
+        return nil
+    }
+
+    private static let textLikeExtensions: Set<String> = [
+        "txt", "md", "markdown", "csv", "tsv", "json", "jsonl", "xml", "html", "css",
+        "js", "ts", "tsx", "jsx", "swift", "kt", "kts", "java", "py", "rb", "go",
+        "rs", "c", "h", "cpp", "hpp", "m", "mm", "sql", "yaml", "yml", "toml", "ini",
+        "log", "sh", "zsh", "bash"
+    ]
 }
 
 enum MarkdownBlock {
@@ -512,9 +635,10 @@ enum AetherImageNormalizer {
 
 struct MessageAttachmentThumbnail: View {
     let attachment: ChatAttachment
+    var isDark: Bool = false
 
     var body: some View {
-        if let image = UIImage(data: attachment.data) {
+        if attachment.isImage, let image = UIImage(data: attachment.data) {
             Image(uiImage: image)
                 .resizable()
                 .scaledToFill()
@@ -524,6 +648,28 @@ struct MessageAttachmentThumbnail: View {
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
                         .stroke(Color.white.opacity(0.3), lineWidth: 1)
                 )
+        } else {
+            HStack(spacing: 10) {
+                Image(systemName: attachment.isTextFile ? "doc.text.fill" : "doc.fill")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(AetherColors.oakMedium)
+                    .frame(width: 34, height: 34)
+                    .background(AetherColors.oakMedium.opacity(0.12))
+                    .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(attachment.displayName)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(isDark ? AetherColors.warmGray200 : AetherColors.warmBlack)
+                        .lineLimit(1)
+                    Text(attachment.isTextFile ? "Ready to read" : "Attached file")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(AetherColors.warmGray500)
+                }
+            }
+            .padding(10)
+            .frame(width: 210, alignment: .leading)
+            .background(isDark ? AetherColors.warmGray900.opacity(0.55) : AetherColors.warmGray100)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
     }
 }
@@ -537,9 +683,7 @@ struct AttachmentTray: View {
                 HStack(spacing: 10) {
                     ForEach(attachments) { attachment in
                         ZStack(alignment: .topTrailing) {
-                            MessageAttachmentThumbnail(attachment: attachment)
-                                .frame(width: 88, height: 68)
-                                .clipped()
+                            AttachmentTrayItem(attachment: attachment)
                             Button {
                                 attachments.removeAll { $0.id == attachment.id }
                             } label: {
@@ -557,6 +701,34 @@ struct AttachmentTray: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 10)
             }
+        }
+    }
+}
+
+struct AttachmentTrayItem: View {
+    let attachment: ChatAttachment
+
+    var body: some View {
+        if attachment.isImage, let image = UIImage(data: attachment.data) {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 88, height: 68)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        } else {
+            HStack(spacing: 8) {
+                Image(systemName: attachment.isTextFile ? "doc.text.fill" : "doc.fill")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(AetherColors.oakMedium)
+                Text(attachment.displayName)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(AetherColors.warmBlack)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 10)
+            .frame(width: 138, height: 68, alignment: .leading)
+            .background(AetherColors.warmGray100)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
     }
 }
@@ -603,6 +775,7 @@ struct InputBar: View {
     let isSending: Bool
     let isDark: Bool
     var focused: FocusState<Bool>.Binding
+    let onFile: () -> Void
     let onCamera: () -> Void
     let onStop: () -> Void
     let onSend: () -> Void
@@ -616,11 +789,20 @@ struct InputBar: View {
             AttachmentTray(attachments: $attachments)
 
             HStack(spacing: 10) {
+                Button(action: onFile) {
+                    Image(systemName: "paperclip")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundColor(AetherColors.oakMedium)
+                        .frame(width: 32, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .disabled(isSending)
+
                 PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
                     Image(systemName: "photo.on.rectangle.angled")
                         .font(.system(size: 17, weight: .semibold))
                         .foregroundColor(AetherColors.oakMedium)
-                        .frame(width: 36, height: 44)
+                        .frame(width: 32, height: 44)
                         .contentShape(Rectangle())
                 }
                 .disabled(isSending)
@@ -629,7 +811,7 @@ struct InputBar: View {
                     Image(systemName: "camera.fill")
                         .font(.system(size: 17, weight: .semibold))
                         .foregroundColor(AetherColors.oakMedium)
-                        .frame(width: 36, height: 44)
+                        .frame(width: 32, height: 44)
                         .contentShape(Rectangle())
                 }
                 .disabled(isSending)

@@ -87,7 +87,13 @@ struct AetherBackendClient: Sendable {
             parts.append(.text(text))
         }
         parts += message.attachments.map { attachment in
-            .imageURL("data:\(attachment.mimeType);base64,\(attachment.data.base64EncodedString())")
+            if attachment.isImage {
+                return .imageURL("data:\(attachment.mimeType);base64,\(attachment.data.base64EncodedString())")
+            }
+            if let text = attachment.extractedText?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty {
+                return .text("[Attached file: \(attachment.displayName)]\n\(String(text.prefix(24_000)))\n[/Attached file]")
+            }
+            return .text("[Attached file: \(attachment.displayName), \(attachment.mimeType). The file could not be converted to text.]")
         }
         return .parts(parts)
     }

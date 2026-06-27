@@ -73,12 +73,26 @@ struct ChatAttachment: Identifiable, Sendable {
     let data: Data
     let mimeType: String
     let filename: String
+    let extractedText: String?
 
-    init(id: UUID = UUID(), data: Data, mimeType: String = "image/jpeg", filename: String = "image.jpg") {
+    init(id: UUID = UUID(), data: Data, mimeType: String = "image/jpeg", filename: String = "image.jpg", extractedText: String? = nil) {
         self.id = id
         self.data = data
         self.mimeType = mimeType
         self.filename = filename
+        self.extractedText = extractedText
+    }
+
+    var isImage: Bool {
+        mimeType.hasPrefix("image/")
+    }
+
+    var isTextFile: Bool {
+        extractedText?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+    }
+
+    var displayName: String {
+        filename.isEmpty ? "Attachment" : filename
     }
 }
 
@@ -137,7 +151,7 @@ class AppState: ObservableObject {
         guard let idx = conversations.firstIndex(where: { $0.id == id }) else { return }
         let userMsg = ChatMessage(role: .user, content: text, attachments: attachments)
         conversations[idx].messages.append(userMsg)
-        conversations[idx].previewText = text.isEmpty ? "\(attachments.count) image attachment\(attachments.count == 1 ? "" : "s")" : text
+        conversations[idx].previewText = text.isEmpty ? attachmentPreview(for: attachments) : text
         conversations[idx].updatedAt = Date()
 
         let persona = conversations[idx].persona
@@ -152,7 +166,7 @@ class AppState: ObservableObject {
 
         do {
             generationStatusMessage = messageSnapshot.contains(where: { !$0.attachments.isEmpty })
-                ? "Looking at the image and reading the conversation"
+                ? "Reading attachments and the conversation"
                 : "Reading the conversation"
             let response = try await generateReply(
                 persona: persona,
@@ -233,6 +247,21 @@ class AppState: ObservableObject {
             title: "\(conversationTitle) replied",
             body: String(preview.prefix(160))
         )
+    }
+
+    private func attachmentPreview(for attachments: [ChatAttachment]) -> String {
+        let imageCount = attachments.filter(\.isImage).count
+        let fileCount = attachments.count - imageCount
+        switch (imageCount, fileCount) {
+        case (0, 0):
+            return ""
+        case (_, 0):
+            return "\(imageCount) image attachment\(imageCount == 1 ? "" : "s")"
+        case (0, _):
+            return "\(fileCount) file attachment\(fileCount == 1 ? "" : "s")"
+        default:
+            return "\(imageCount) image\(imageCount == 1 ? "" : "s"), \(fileCount) file\(fileCount == 1 ? "" : "s")"
+        }
     }
 }
 

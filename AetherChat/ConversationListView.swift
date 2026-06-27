@@ -156,6 +156,10 @@ struct ConversationRow: View {
     let onPin: () -> Void
     let onDelete: () -> Void
 
+    private var isCurrentlyPinned: Bool {
+        state.conversations.first(where: { $0.id == conv.id })?.isPinned ?? conv.isPinned
+    }
+
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 14) {
@@ -205,7 +209,7 @@ struct ConversationRow: View {
         }
         .contextMenu {
             Button(action: onPin) {
-                Label(conv.isPinned ? "Unpin" : "Pin to Top", systemImage: "pin")
+                Label(isCurrentlyPinned ? "Unpin" : "Pin to Top", systemImage: isCurrentlyPinned ? "pin.slash" : "pin")
             }
             Button(role: .destructive, action: onDelete) {
                 Label("Delete", systemImage: "trash")

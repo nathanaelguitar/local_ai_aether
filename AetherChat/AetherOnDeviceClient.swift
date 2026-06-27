@@ -21,7 +21,7 @@ actor AetherOnDeviceClient {
         try Task.checkCancellation()
         await status?(nil)
         let prompt = AetherPromptBuilder.prompt(persona: persona, messages: messages)
-        let promptAttachments = messages.suffix(16).flatMap(\.attachments)
+        let promptAttachments = messages.suffix(16).flatMap(\.attachments).filter(\.isImage)
         return try engine.generate(prompt: prompt, attachments: promptAttachments)
         #else
         throw AetherOnDeviceError.llamaUnavailable
@@ -177,8 +177,11 @@ enum AetherPromptBuilder {
 
         for message in messages.suffix(16) {
             prompt += "<|im_start|>\(message.role.apiRole)\n"
-            for _ in message.attachments {
+            for _ in message.attachments.filter(\.isImage) {
                 prompt += "\(AetherPromptBuilder.mediaMarker)\n"
+            }
+            for attachment in message.attachments where !attachment.isImage {
+                prompt += AetherPromptBuilder.fileContext(for: attachment)
             }
             prompt += message.content
             prompt += "<|im_end|>\n"
@@ -189,6 +192,18 @@ enum AetherPromptBuilder {
     }
 
     private static let mediaMarker = "<__media__>"
+
+    private static func fileContext(for attachment: ChatAttachment) -> String {
+        guard let text = attachment.extractedText?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else {
+            return "[Attached file: \(attachment.displayName), \(attachment.mimeType). The file could not be converted to text.]\n\n"
+        }
+        return """
+        [Attached file: \(attachment.displayName)]
+        \(String(text.prefix(24_000)))
+        [/Attached file]
+
+        """
+    }
 }
 
 #if canImport(LlamaSwift)
