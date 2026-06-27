@@ -21,10 +21,25 @@ struct ChatMessage: Identifiable, Sendable {
     let id: UUID
     let role: MessageRole
     var content: String
+    var attachments: [ChatAttachment]
     let timestamp: Date
 
-    init(id: UUID = UUID(), role: MessageRole, content: String, timestamp: Date = Date()) {
-        self.id = id; self.role = role; self.content = content; self.timestamp = timestamp
+    init(id: UUID = UUID(), role: MessageRole, content: String, attachments: [ChatAttachment] = [], timestamp: Date = Date()) {
+        self.id = id; self.role = role; self.content = content; self.attachments = attachments; self.timestamp = timestamp
+    }
+}
+
+struct ChatAttachment: Identifiable, Sendable {
+    let id: UUID
+    let data: Data
+    let mimeType: String
+    let filename: String
+
+    init(id: UUID = UUID(), data: Data, mimeType: String = "image/jpeg", filename: String = "image.jpg") {
+        self.id = id
+        self.data = data
+        self.mimeType = mimeType
+        self.filename = filename
     }
 }
 
@@ -76,11 +91,11 @@ class AppState: ObservableObject {
         conversations.insert(Conversation(title: title, workspace: workspace, persona: persona), at: 0)
     }
 
-    func sendMessage(in id: UUID, text: String) async {
+    func sendMessage(in id: UUID, text: String, attachments: [ChatAttachment] = []) async {
         guard let idx = conversations.firstIndex(where: { $0.id == id }) else { return }
-        let userMsg = ChatMessage(role: .user, content: text)
+        let userMsg = ChatMessage(role: .user, content: text, attachments: attachments)
         conversations[idx].messages.append(userMsg)
-        conversations[idx].previewText = text
+        conversations[idx].previewText = text.isEmpty ? "\(attachments.count) image attachment\(attachments.count == 1 ? "" : "s")" : text
         conversations[idx].updatedAt = Date()
 
         let persona = conversations[idx].persona

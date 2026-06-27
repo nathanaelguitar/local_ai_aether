@@ -11,21 +11,22 @@ actor AetherOnDeviceClient {
 
     func send(persona: AssistantPersona, messages: [ChatMessage]) async throws -> String {
         #if canImport(LlamaSwift)
-        let modelURL = try await AetherModelStore.localAetherV1URL()
-        let engine = try loadEngine(modelURL: modelURL)
+        let modelFiles = try await AetherModelStore.localAetherV1Files()
+        let engine = try loadEngine(modelURL: modelFiles.modelURL, mmprojURL: modelFiles.mmprojURL)
         let prompt = AetherPromptBuilder.prompt(persona: persona, messages: messages)
-        return try engine.generate(prompt: prompt)
+        let promptAttachments = messages.suffix(16).flatMap(\.attachments)
+        return try engine.generate(prompt: prompt, attachments: promptAttachments)
         #else
         throw AetherOnDeviceError.llamaUnavailable
         #endif
     }
 
     #if canImport(LlamaSwift)
-    private func loadEngine(modelURL: URL) throws -> AetherLlamaEngine {
+    private func loadEngine(modelURL: URL, mmprojURL: URL) throws -> AetherLlamaEngine {
         if let engine {
             return engine
         }
-        let engine = try AetherLlamaEngine(modelURL: modelURL)
+        let engine = try AetherLlamaEngine(modelURL: modelURL, mmprojURL: mmprojURL)
         self.engine = engine
         return engine
     }
@@ -42,6 +43,10 @@ enum AetherOnDeviceError: LocalizedError {
     case decodeFailed
     case emptyResponse
     case unsupportedLocalModel(String)
+    case visionUnsupported
+    case projectorLoadFailed
+    case imagePreprocessingFailed
+    case multimodalTokenizationFailed
 
     var errorDescription: String? {
         switch self {
@@ -63,19 +68,47 @@ enum AetherOnDeviceError: LocalizedError {
             return "Aether V1 generated an empty response."
         case .unsupportedLocalModel(let model):
             return "\(model) is not available for on-device inference. Select Aether V1 or switch the provider to Backend."
+        case .visionUnsupported:
+            return "Aether V1 could not use image input in this build."
+        case .projectorLoadFailed:
+            return "Aether V1 vision projector could not be loaded."
+        case .imagePreprocessingFailed:
+            return "Aether V1 could not preprocess the attached image."
+        case .multimodalTokenizationFailed:
+            return "Aether V1 could not tokenize the multimodal prompt."
         }
     }
 }
 
 enum AetherModelStore {
-    static func localAetherV1URL() async throws -> URL {
+    struct AetherV1Files {
+        let modelURL: URL
+        let mmprojURL: URL
+    }
+
+    static func localAetherV1Files() async throws -> AetherV1Files {
         let directory = try modelDirectory()
-        let destination = directory.appendingPathComponent(AetherModelCatalog.aetherV1GGUFFilename)
+        return AetherV1Files(
+            modelURL: try await localFile(
+                directory: directory,
+                filename: AetherModelCatalog.aetherV1GGUFFilename,
+                remoteURL: AetherModelCatalog.aetherV1DownloadURL
+            ),
+            mmprojURL: try await localFile(
+                directory: directory,
+                filename: AetherModelCatalog.aetherV1MMProjFilename,
+                remoteURL: AetherModelCatalog.aetherV1MMProjDownloadURL
+            )
+        )
+    }
+
+    private static func localFile(directory: URL, filename: String, remoteURL: URL) async throws -> URL {
+        let destination = directory.appendingPathComponent(filename)
         if FileManager.default.fileExists(atPath: destination.path) {
             return destination
         }
 
-        let (temporaryURL, response) = try await URLSession.shared.download(from: AetherModelCatalog.aetherV1DownloadURL)
+        let (temporaryURL, response) = try await URLSession.shared.download(from: remoteURL)
         guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else {
             throw AetherOnDeviceError.modelDownloadFailed
         }
@@ -110,6 +143,9 @@ enum AetherPromptBuilder {
 
         for message in messages.suffix(16) {
             prompt += "<|im_start|>\(message.role.apiRole)\n"
+            for _ in message.attachments {
+                prompt += "\(AetherPromptBuilder.mediaMarker)\n"
+            }
             prompt += message.content
             prompt += "<|im_end|>\n"
         }
@@ -117,16 +153,19 @@ enum AetherPromptBuilder {
         prompt += "<|im_start|>assistant\n<think>\n</think>\n\n"
         return prompt
     }
+
+    private static let mediaMarker = "<__media__>"
 }
 
 #if canImport(LlamaSwift)
 final class AetherLlamaEngine {
     private let model: OpaquePointer
     private let context: OpaquePointer
+    private let mtmdContext: OpaquePointer
     private let vocab: OpaquePointer
     private let contextTokens: Int32
 
-    init(modelURL: URL) throws {
+    init(modelURL: URL, mmprojURL: URL) throws {
         llama_backend_init()
 
         var modelParams = llama_model_default_params()
@@ -147,37 +186,57 @@ final class AetherLlamaEngine {
             throw AetherOnDeviceError.contextLoadFailed
         }
 
+        var mtmdParams = mtmd_context_params_default()
+        mtmdParams.use_gpu = true
+        mtmdParams.n_threads = Int32(max(2, min(6, ProcessInfo.processInfo.processorCount - 2)))
+        guard let mtmdContext = mtmd_init_from_file(mmprojURL.path, model, mtmdParams), mtmd_support_vision(mtmdContext) else {
+            llama_free(context)
+            llama_model_free(model)
+            throw AetherOnDeviceError.projectorLoadFailed
+        }
+
         self.model = model
         self.context = context
+        self.mtmdContext = mtmdContext
         self.vocab = llama_model_get_vocab(model)
         self.contextTokens = Int32(contextParams.n_ctx)
     }
 
     deinit {
+        mtmd_free(mtmdContext)
         llama_free(context)
         llama_model_free(model)
         llama_backend_free()
     }
 
-    func generate(prompt: String) throws -> String {
+    func generate(prompt: String, attachments: [ChatAttachment]) throws -> String {
         llama_memory_clear(llama_get_memory(context), true)
+        if attachments.isEmpty {
+            let promptTokens = try tokenize(prompt)
+            guard !promptTokens.isEmpty, Int32(promptTokens.count) < contextTokens else {
+                throw AetherOnDeviceError.tokenizationFailed
+            }
 
-        let promptTokens = try tokenize(prompt)
-        guard !promptTokens.isEmpty, Int32(promptTokens.count) < contextTokens else {
-            throw AetherOnDeviceError.tokenizationFailed
+            var batch = llama_batch_init(512, 0, 1)
+            defer { llama_batch_free(batch) }
+
+            try decodePrompt(tokens: promptTokens, batch: &batch)
+            return try generateCompletion(startPosition: Int32(promptTokens.count), previousToken: promptTokens.last ?? llama_vocab_bos(vocab))
         }
 
+        let startPosition = try decodeMultimodalPrompt(prompt: prompt, attachments: attachments)
+        return try generateCompletion(startPosition: startPosition, previousToken: llama_vocab_bos(vocab))
+    }
+
+    private func generateCompletion(startPosition: Int32, previousToken: llama_token) throws -> String {
+        var generated = ""
+        var position = startPosition
+        var previousToken = previousToken
         var batch = llama_batch_init(512, 0, 1)
         defer { llama_batch_free(batch) }
 
-        try decodePrompt(tokens: promptTokens, batch: &batch)
-
-        var generated = ""
-        var position = Int32(promptTokens.count)
-        var previousToken = promptTokens.last ?? llama_vocab_bos(vocab)
-
         for _ in 0..<AetherModelCatalog.aetherV1MaxOutputTokens {
-            let next = try sampleGreedy(batch: batch)
+            let next = try sampleGreedy()
             if next == llama_vocab_eos(vocab) || next == previousToken && generated.isEmpty {
                 break
             }
@@ -199,6 +258,63 @@ final class AetherLlamaEngine {
             throw AetherOnDeviceError.emptyResponse
         }
         return cleaned
+    }
+
+    private func decodeMultimodalPrompt(prompt: String, attachments: [ChatAttachment]) throws -> Int32 {
+        let chunks = mtmd_input_chunks_init()
+        guard let chunks else {
+            throw AetherOnDeviceError.multimodalTokenizationFailed
+        }
+        defer { mtmd_input_chunks_free(chunks) }
+
+        let bitmapPointers = try attachments.map { attachment in
+            try makeBitmap(from: attachment)
+        }
+        defer {
+            for bitmap in bitmapPointers {
+                mtmd_bitmap_free(bitmap)
+            }
+        }
+
+        var mutableBitmapPointers = bitmapPointers.map { Optional($0) }
+        let tokenizeResult = prompt.withCString { promptCString in
+            var input = mtmd_input_text(text: promptCString, add_special: true, parse_special: true)
+            return mutableBitmapPointers.withUnsafeMutableBufferPointer { buffer in
+                mtmd_tokenize(mtmdContext, chunks, &input, buffer.baseAddress, buffer.count)
+            }
+        }
+        guard tokenizeResult == 0 else {
+            throw AetherOnDeviceError.multimodalTokenizationFailed
+        }
+
+        var nPast = llama_pos(0)
+        guard mtmd_helper_eval_chunks(
+            mtmdContext,
+            context,
+            chunks,
+            0,
+            0,
+            512,
+            true,
+            &nPast
+        ) == 0 else {
+            throw AetherOnDeviceError.decodeFailed
+        }
+
+        return Int32(nPast)
+    }
+
+    private func makeBitmap(from attachment: ChatAttachment) throws -> OpaquePointer {
+        try attachment.data.withUnsafeBytes { bytes in
+            guard let baseAddress = bytes.bindMemory(to: UInt8.self).baseAddress else {
+                throw AetherOnDeviceError.imagePreprocessingFailed
+            }
+            let wrapper = mtmd_helper_bitmap_init_from_buf(mtmdContext, baseAddress, attachment.data.count, false)
+            guard let bitmap = wrapper.bitmap else {
+                throw AetherOnDeviceError.imagePreprocessingFailed
+            }
+            return bitmap
+        }
     }
 
     private func tokenize(_ prompt: String) throws -> [llama_token] {
@@ -255,8 +371,8 @@ final class AetherLlamaEngine {
         }
     }
 
-    private func sampleGreedy(batch: llama_batch) throws -> llama_token {
-        guard let logits = llama_get_logits_ith(context, batch.n_tokens - 1) else {
+    private func sampleGreedy() throws -> llama_token {
+        guard let logits = llama_get_logits(context) else {
             throw AetherOnDeviceError.decodeFailed
         }
 

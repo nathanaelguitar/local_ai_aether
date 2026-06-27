@@ -9,9 +9,10 @@ enum InferenceProvider: String, CaseIterable, Identifiable {
 
 enum AetherModelCatalog {
     static let aetherV1DisplayName = "Aether V1"
-    static let requestedGGUFRepository = "Jackrong/Qwen3.5-2B-Claude-4.6-Opus-Reasoning-Distilled-GGUF"
+    static let requestedGGUFRepository = "mradermacher/Qwen3.5-2b-Kimi-and-Opus-Distillation-GGUF"
     static let requestedGGUFQuantization = "Q4_K_M"
-    static let aetherV1GGUFFilename = "Qwen3.5-2B.Q4_K_M.gguf"
+    static let aetherV1GGUFFilename = "Qwen3.5-2b-Kimi-and-Opus-Distillation.Q4_K_M.gguf"
+    static let aetherV1MMProjFilename = "Qwen3.5-2b-Kimi-and-Opus-Distillation.mmproj-Q8_0.gguf"
     static let aetherV1ContextTokens: Int32 = 4096
     static let aetherV1MaxOutputTokens: Int32 = 512
 
@@ -19,7 +20,11 @@ enum AetherModelCatalog {
         string: "https://huggingface.co/\(requestedGGUFRepository)/resolve/main/\(aetherV1GGUFFilename)"
     )!
 
+    static let aetherV1MMProjDownloadURL = URL(
+        string: "https://huggingface.co/\(requestedGGUFRepository)/resolve/main/\(aetherV1MMProjFilename)"
+    )!
+
     static var aetherV1RuntimeMessage: String {
-        "Aether V1 runs locally with llama.cpp using \(aetherV1GGUFFilename). The first on-device reply downloads about 1 GB, then caches the model on this iPhone."
+        "Aether V1 runs locally with llama.cpp using \(aetherV1GGUFFilename) and the \(aetherV1MMProjFilename) vision projector. The first on-device reply downloads about 1.7 GB, then caches the files on this iPhone."
     }
 }

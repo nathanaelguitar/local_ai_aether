@@ -1,4 +1,6 @@
 import SwiftUI
+import PhotosUI
+import UIKit
 
 struct ChatView: View {
     @EnvironmentObject var state: AppState
@@ -6,6 +8,9 @@ struct ChatView: View {
 
     @State private var inputText = ""
     @State private var isSending = false
+    @State private var attachments: [ChatAttachment] = []
+    @State private var selectedPhotoItem: PhotosPickerItem?
+    @State private var showingCamera = false
     @FocusState private var inputFocused: Bool
 
     var conversation: Conversation? {
@@ -51,8 +56,34 @@ struct ChatView: View {
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            InputBar(text: $inputText, isSending: isSending, isDark: state.isDarkTheme, focused: $inputFocused) {
+            InputBar(
+                text: $inputText,
+                attachments: $attachments,
+                selectedPhotoItem: $selectedPhotoItem,
+                isSending: isSending,
+                isDark: state.isDarkTheme,
+                focused: $inputFocused,
+                onCamera: { showingCamera = true }
+            ) {
                 send()
+            }
+        }
+        .sheet(isPresented: $showingCamera) {
+            CameraCaptureView { data in
+                if let data {
+                    attachments.append(ChatAttachment(data: data, filename: "camera.jpg"))
+                }
+                showingCamera = false
+            }
+        }
+        .onChange(of: selectedPhotoItem) { _, item in
+            guard let item else { return }
+            Task {
+                if let data = try? await item.loadTransferable(type: Data.self),
+                   let normalized = normalizedJPEGData(from: data) {
+                    attachments.append(ChatAttachment(data: normalized, filename: "photo.jpg"))
+                }
+                selectedPhotoItem = nil
             }
         }
         .navigationBarTitleDisplayMode(.inline)
@@ -74,14 +105,21 @@ struct ChatView: View {
 
     func send() {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !isSending else { return }
+        let outgoingAttachments = attachments
+        guard (!text.isEmpty || !outgoingAttachments.isEmpty), !isSending else { return }
         inputText = ""
+        attachments = []
         inputFocused = false
         isSending = true
         Task {
-            await state.sendMessage(in: conversationId, text: text)
+            await state.sendMessage(in: conversationId, text: text, attachments: outgoingAttachments)
             isSending = false
         }
+    }
+
+    private func normalizedJPEGData(from data: Data) -> Data? {
+        guard let image = UIImage(data: data) else { return data }
+        return image.jpegData(compressionQuality: 0.82)
     }
 }
 
@@ -92,29 +130,239 @@ struct MessageBubble: View {
     var isUser: Bool { message.role == .user }
 
     var body: some View {
-        HStack {
+        HStack(alignment: .bottom) {
             if isUser { Spacer(minLength: 60) }
-            Text(message.content)
-                .font(.system(size: 15))
-                .foregroundColor(isDark ? AetherColors.warmGray200 : AetherColors.warmBlack)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                .background(bubbleColor)
-                .clipShape(
-                    RoundedCornerShape(
-                        topLeft: 20, topRight: 20,
-                        bottomLeft: isUser ? 20 : 4,
-                        bottomRight: isUser ? 4 : 20
-                    )
+            VStack(alignment: .leading, spacing: 10) {
+                if !message.attachments.isEmpty {
+                    ForEach(message.attachments) { attachment in
+                        MessageAttachmentThumbnail(attachment: attachment)
+                    }
+                }
+
+                if !message.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    if isUser {
+                        Text(message.content)
+                            .font(.system(size: 15))
+                            .foregroundColor(isDark ? AetherColors.warmGray200 : AetherColors.warmBlack)
+                    } else {
+                        MarkdownMessageText(message.content)
+                            .foregroundColor(isDark ? AetherColors.warmGray200 : AetherColors.warmBlack)
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(bubbleColor)
+            .clipShape(
+                RoundedCornerShape(
+                    topLeft: 20, topRight: 20,
+                    bottomLeft: isUser ? 20 : 4,
+                    bottomRight: isUser ? 4 : 20
                 )
+            )
             if !isUser { Spacer(minLength: 60) }
         }
         .padding(.horizontal, 16)
+        .textSelection(.enabled)
     }
 
     var bubbleColor: Color {
         if isUser { return isDark ? AetherColors.oakMedium : AetherColors.oakMedium.opacity(0.85) }
         return isDark ? AetherColors.warmGray800 : Color.white
+    }
+}
+
+struct MarkdownMessageText: View {
+    let content: String
+
+    init(_ content: String) {
+        self.content = content
+    }
+
+    var body: some View {
+        Text(markdown)
+            .font(.system(size: 15))
+            .lineSpacing(4)
+    }
+
+    private var markdown: AttributedString {
+        (try? AttributedString(
+            markdown: content,
+            options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .full)
+        )) ?? AttributedString(content)
+    }
+}
+
+struct MessageAttachmentThumbnail: View {
+    let attachment: ChatAttachment
+
+    var body: some View {
+        if let image = UIImage(data: attachment.data) {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 180, height: 140)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(Color.white.opacity(0.3), lineWidth: 1)
+                )
+        }
+    }
+}
+
+struct AttachmentTray: View {
+    @Binding var attachments: [ChatAttachment]
+
+    var body: some View {
+        if !attachments.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(attachments) { attachment in
+                        ZStack(alignment: .topTrailing) {
+                            MessageAttachmentThumbnail(attachment: attachment)
+                                .frame(width: 88, height: 68)
+                                .clipped()
+                            Button {
+                                attachments.removeAll { $0.id == attachment.id }
+                            } label: {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 10, weight: .bold))
+                                    .foregroundColor(.white)
+                                    .frame(width: 22, height: 22)
+                                    .background(Color.black.opacity(0.55))
+                                    .clipShape(Circle())
+                            }
+                            .offset(x: 6, y: -6)
+                        }
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 10)
+            }
+        }
+    }
+}
+
+struct CameraCaptureView: UIViewControllerRepresentable {
+    let onComplete: (Data?) -> Void
+
+    func makeUIViewController(context: Context) -> UIImagePickerController {
+        let picker = UIImagePickerController()
+        picker.delegate = context.coordinator
+        picker.sourceType = UIImagePickerController.isSourceTypeAvailable(.camera) ? .camera : .photoLibrary
+        picker.cameraCaptureMode = .photo
+        return picker
+    }
+
+    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onComplete: onComplete)
+    }
+
+    final class Coordinator: NSObject, UINavigationControllerDelegate, UIImagePickerControllerDelegate {
+        let onComplete: (Data?) -> Void
+
+        init(onComplete: @escaping (Data?) -> Void) {
+            self.onComplete = onComplete
+        }
+
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+            onComplete(nil)
+        }
+
+        func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
+            let image = info[.editedImage] as? UIImage ?? info[.originalImage] as? UIImage
+            onComplete(image?.jpegData(compressionQuality: 0.82))
+        }
+    }
+}
+
+struct InputBar: View {
+    @Binding var text: String
+    @Binding var attachments: [ChatAttachment]
+    @Binding var selectedPhotoItem: PhotosPickerItem?
+    let isSending: Bool
+    let isDark: Bool
+    var focused: FocusState<Bool>.Binding
+    let onCamera: () -> Void
+    let onSend: () -> Void
+
+    var canSend: Bool {
+        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            AttachmentTray(attachments: $attachments)
+
+            HStack(spacing: 10) {
+                PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
+                    Image(systemName: "photo.on.rectangle.angled")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundColor(AetherColors.oakMedium)
+                        .frame(width: 36, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .disabled(isSending)
+
+                Button(action: onCamera) {
+                    Image(systemName: "camera.fill")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundColor(AetherColors.oakMedium)
+                        .frame(width: 36, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .disabled(isSending)
+
+                if focused.wrappedValue {
+                    Button {
+                        focused.wrappedValue = false
+                    } label: {
+                        Image(systemName: "keyboard.chevron.compact.down")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundColor(AetherColors.oakMedium)
+                            .frame(width: 34, height: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .transition(.move(edge: .leading).combined(with: .opacity))
+                }
+
+                TextField("Message your assistant...", text: $text, axis: .vertical)
+                    .font(.system(size: 15))
+                    .lineLimit(1...5)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(isDark ? AetherColors.warmGray800 : AetherColors.warmGray100)
+                    .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    .focused(focused)
+
+                Button(action: onSend) {
+                    ZStack {
+                        Circle()
+                            .fill(!canSend ? AetherColors.warmGray200 : AetherColors.oakMedium)
+                            .frame(width: 44, height: 44)
+                        if isSending {
+                            ProgressView()
+                                .tint(.white)
+                                .scaleEffect(0.8)
+                        } else {
+                            Image(systemName: "arrow.up")
+                                .font(.system(size: 17, weight: .semibold))
+                                .foregroundColor(.white)
+                        }
+                    }
+                }
+                .disabled(!canSend || isSending)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+        }
+        .background(isDark ? AetherColors.warmGray900 : Color.white)
+        .shadow(color: .black.opacity(0.08), radius: 12, y: -2)
+        .animation(.easeInOut(duration: 0.18), value: focused.wrappedValue)
+        .animation(.easeInOut(duration: 0.18), value: attachments.count)
     }
 }
 
@@ -144,64 +392,6 @@ struct TypingIndicator: View {
                 phase = .pi * 2
             }
         }
-    }
-}
-
-struct InputBar: View {
-    @Binding var text: String
-    let isSending: Bool
-    let isDark: Bool
-    var focused: FocusState<Bool>.Binding
-    let onSend: () -> Void
-
-    var body: some View {
-        HStack(spacing: 12) {
-            if focused.wrappedValue {
-                Button {
-                    focused.wrappedValue = false
-                } label: {
-                    Image(systemName: "keyboard.chevron.compact.down")
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundColor(AetherColors.oakMedium)
-                        .frame(width: 34, height: 44)
-                        .contentShape(Rectangle())
-                }
-                .transition(.move(edge: .leading).combined(with: .opacity))
-            }
-
-            TextField("Message your assistant...", text: $text, axis: .vertical)
-                .font(.system(size: 15))
-                .lineLimit(1...5)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
-                .background(isDark ? AetherColors.warmGray800 : AetherColors.warmGray100)
-                .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-                .focused(focused)
-
-            Button(action: onSend) {
-                ZStack {
-                    Circle()
-                        .fill(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                              ? AetherColors.warmGray200 : AetherColors.oakMedium)
-                        .frame(width: 44, height: 44)
-                    if isSending {
-                        ProgressView()
-                            .tint(.white)
-                            .scaleEffect(0.8)
-                    } else {
-                        Image(systemName: "arrow.up")
-                            .font(.system(size: 17, weight: .semibold))
-                            .foregroundColor(.white)
-                    }
-                }
-            }
-            .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSending)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(isDark ? AetherColors.warmGray900 : Color.white)
-        .shadow(color: .black.opacity(0.08), radius: 12, y: -2)
-        .animation(.easeInOut(duration: 0.18), value: focused.wrappedValue)
     }
 }
 

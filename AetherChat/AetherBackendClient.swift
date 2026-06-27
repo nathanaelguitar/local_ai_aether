@@ -66,14 +66,30 @@ struct AetherBackendClient: Sendable {
         return url
     }
 
-    private func makeMessages(persona: AssistantPersona, messages: [ChatMessage]) -> [OpenAIMessage] {
-        let system = OpenAIMessage(
+    private func makeMessages(persona: AssistantPersona, messages: [ChatMessage]) -> [OpenAIRequestMessage] {
+        let system = OpenAIRequestMessage(
             role: "system",
-            content: "You are \(persona.name), \(persona.description). Reply in a grounded, helpful tone."
+            content: .text("You are \(persona.name), \(persona.description). Reply in a grounded, helpful tone.")
         )
         return [system] + messages.suffix(20).map { message in
-            OpenAIMessage(role: message.role.apiRole, content: message.content)
+            OpenAIRequestMessage(role: message.role.apiRole, content: requestContent(for: message))
         }
+    }
+
+    private func requestContent(for message: ChatMessage) -> OpenAIMessageContent {
+        guard !message.attachments.isEmpty else {
+            return .text(message.content)
+        }
+
+        var parts = [OpenAIContentPart]()
+        let text = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !text.isEmpty {
+            parts.append(.text(text))
+        }
+        parts += message.attachments.map { attachment in
+            .imageURL("data:\(attachment.mimeType);base64,\(attachment.data.base64EncodedString())")
+        }
+        return .parts(parts)
     }
 }
 
@@ -99,7 +115,7 @@ enum AetherBackendError: LocalizedError {
 
 private struct ChatCompletionRequest: Encodable {
     let model: String
-    let messages: [OpenAIMessage]
+    let messages: [OpenAIRequestMessage]
     let temperature: Double
     let maxTokens: Int
     let stream: Bool
@@ -110,8 +126,55 @@ private struct ChatCompletionRequest: Encodable {
     }
 }
 
-private struct OpenAIMessage: Codable {
+private struct OpenAIRequestMessage: Encodable {
     let role: String
+    let content: OpenAIMessageContent
+}
+
+private enum OpenAIMessageContent: Encodable {
+    case text(String)
+    case parts([OpenAIContentPart])
+
+    func encode(to encoder: Encoder) throws {
+        switch self {
+        case .text(let text):
+            var container = encoder.singleValueContainer()
+            try container.encode(text)
+        case .parts(let parts):
+            var container = encoder.singleValueContainer()
+            try container.encode(parts)
+        }
+    }
+}
+
+private enum OpenAIContentPart: Encodable {
+    case text(String)
+    case imageURL(String)
+
+    enum CodingKeys: String, CodingKey {
+        case type, text
+        case imageURL = "image_url"
+    }
+
+    enum ImageURLKeys: String, CodingKey {
+        case url
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .text(let text):
+            try container.encode("text", forKey: .type)
+            try container.encode(text, forKey: .text)
+        case .imageURL(let url):
+            try container.encode("image_url", forKey: .type)
+            var imageContainer = container.nestedContainer(keyedBy: ImageURLKeys.self, forKey: .imageURL)
+            try imageContainer.encode(url, forKey: .url)
+        }
+    }
+}
+
+private struct OpenAIResponseMessage: Decodable {
     let content: String
 }
 
@@ -119,6 +182,6 @@ private struct ChatCompletionResponse: Decodable {
     let choices: [Choice]
 
     struct Choice: Decodable {
-        let message: OpenAIMessage
+        let message: OpenAIResponseMessage
     }
 }
