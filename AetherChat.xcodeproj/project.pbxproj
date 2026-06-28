@@ -20,6 +20,7 @@
 		BD19FEDCFEC33192A151A809 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F7C8667FF0B2BD51ECB8A79 /* ContentView.swift */; };
 		BD40D3F027D6CEF0ED707465 /* LlamaSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 2CDBE4BCB2CEB38B77FCD8FE /* LlamaSwift */; };
 		DEA563445D69FD229384551E /* WelcomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA3332E3AE730AB8A109BB39 /* WelcomeView.swift */; };
+		E38074921CFF15F5C13F004E /* AetherWebSearchService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 998CAB07B8AB6F632D0F9289 /* AetherWebSearchService.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -28,6 +29,7 @@
 		206E2F83A641F2A88EE4DA46 /* AetherBackendClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AetherBackendClient.swift; sourceTree = "<group>"; };
 		6F7C8667FF0B2BD51ECB8A79 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		7072D9240F6DED5D1510BDD3 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		998CAB07B8AB6F632D0F9289 /* AetherWebSearchService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AetherWebSearchService.swift; sourceTree = "<group>"; };
 		9D5974F2A6845866B4D19213 /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
 		A75CC71D6D8AE5048E923411 /* AetherChatApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AetherChatApp.swift; sourceTree = "<group>"; };
 		AA3332E3AE730AB8A109BB39 /* WelcomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WelcomeView.swift; sourceTree = "<group>"; };
@@ -66,6 +68,7 @@
 				A75CC71D6D8AE5048E923411 /* AetherChatApp.swift */,
 				16F4CB5C5C53D3927BB126F7 /* AetherModelCatalog.swift */,
 				B74413AB0BA1012F10A00D97 /* AetherOnDeviceClient.swift */,
+				998CAB07B8AB6F632D0F9289 /* AetherWebSearchService.swift */,
 				9D5974F2A6845866B4D19213 /* ChatView.swift */,
 				6F7C8667FF0B2BD51ECB8A79 /* ContentView.swift */,
 				DBA431CB63F6A9ACBC2F673A /* ConversationListView.swift */,
@@ -155,6 +158,7 @@
 				6E1D39E7FA0B2A618276A463 /* AetherChatApp.swift in Sources */,
 				54FA9D840892A53ADB4B73F4 /* AetherModelCatalog.swift in Sources */,
 				A0643D6E50DAB16D431C0350 /* AetherOnDeviceClient.swift in Sources */,
+				E38074921CFF15F5C13F004E /* AetherWebSearchService.swift in Sources */,
 				B0CAA0CCADC02CFB94962E66 /* ChatView.swift in Sources */,
 				BD19FEDCFEC33192A151A809 /* ContentView.swift in Sources */,
 				110F557D3CFEFA179247DEAF /* ConversationListView.swift in Sources */,

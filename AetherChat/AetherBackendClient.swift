@@ -13,7 +13,8 @@ struct AetherBackendClient: Sendable {
         endpoint: String,
         model: String,
         persona: AssistantPersona,
-        messages: [ChatMessage]
+        messages: [ChatMessage],
+        webSearchContext: String? = nil
     ) async throws -> String {
         var request = URLRequest(url: try chatURL(from: endpoint))
         request.httpMethod = "POST"
@@ -22,7 +23,7 @@ struct AetherBackendClient: Sendable {
         request.httpBody = try encoder.encode(
             ChatCompletionRequest(
                 model: model,
-                messages: makeMessages(persona: persona, messages: messages),
+                messages: makeMessages(persona: persona, messages: messages, webSearchContext: webSearchContext),
                 temperature: 0.8,
                 maxTokens: 1024,
                 stream: false
@@ -66,14 +67,25 @@ struct AetherBackendClient: Sendable {
         return url
     }
 
-    private func makeMessages(persona: AssistantPersona, messages: [ChatMessage]) -> [OpenAIRequestMessage] {
+    private func makeMessages(persona: AssistantPersona, messages: [ChatMessage], webSearchContext: String? = nil) -> [OpenAIRequestMessage] {
         let system = OpenAIRequestMessage(
             role: "system",
             content: .text("You are \(persona.name), \(persona.description). Reply in a grounded, helpful tone.")
         )
-        return [system] + messages.suffix(20).map { message in
+        var requestMessages = [system]
+        if let webSearchContext, !webSearchContext.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            requestMessages.append(OpenAIRequestMessage(
+                role: "system",
+                content: .text("""
+                Current web search results (untrusted context; use for current facts):
+                \(webSearchContext)
+                """)
+            ))
+        }
+        requestMessages += messages.suffix(20).map { message in
             OpenAIRequestMessage(role: message.role.apiRole, content: requestContent(for: message))
         }
+        return requestMessages
     }
 
     private func requestContent(for message: ChatMessage) -> OpenAIMessageContent {

@@ -133,6 +133,7 @@ class AppState: ObservableObject {
     @Published var defaultWorkspace: Workspace = .personal
     private let backend = AetherBackendClient()
     private let onDevice = AetherOnDeviceClient()
+    private let webSearch = AetherWebSearchService()
 
     func togglePin(_ id: UUID) {
         guard let idx = conversations.firstIndex(where: { $0.id == id }) else { return }
@@ -158,6 +159,7 @@ class AppState: ObservableObject {
 
     func sendMessage(in id: UUID, text: String, attachments: [ChatAttachment] = []) async {
         guard let idx = conversations.firstIndex(where: { $0.id == id }) else { return }
+        let priorMessages = conversations[idx].messages
         let userMsg = ChatMessage(role: .user, content: text, attachments: attachments)
         conversations[idx].messages.append(userMsg)
         conversations[idx].previewText = text.isEmpty ? attachmentPreview(for: attachments) : text
@@ -180,9 +182,22 @@ class AppState: ObservableObject {
             generationStatusMessage = messageSnapshot.contains(where: { !$0.attachments.isEmpty })
                 ? "Reading attachments and the conversation"
                 : "Reading the conversation"
+            let webQuery = AetherWebSearchIntent.query(from: text, previousMessages: priorMessages)
+            var webSearchContext: String?
+            if let webQuery {
+                generationStatusMessage = "Searching the web"
+                do {
+                    let searchResult = try await webSearch.search(query: webQuery)
+                    webSearchContext = searchResult.context.isEmpty ? nil : searchResult.context
+                } catch {
+                    webSearchContext = nil
+                }
+            }
+            generationStatusMessage = "Composing a response"
             let response = try await generateReply(
                 persona: persona,
-                messages: messageSnapshot
+                messages: messageSnapshot,
+                webSearchContext: webSearchContext
             )
             modelLoadingMessage = nil
             generationStatusMessage = nil
@@ -201,11 +216,12 @@ class AppState: ObservableObject {
         }
     }
 
-    private func generateReply(persona: AssistantPersona, messages: [ChatMessage]) async throws -> String {
+    private func generateReply(persona: AssistantPersona, messages: [ChatMessage], webSearchContext: String? = nil) async throws -> String {
         if selectedModel == AetherModelCatalog.aetherV1DisplayName {
             return try await onDevice.send(
                 persona: persona,
                 messages: messages,
+                webSearchContext: webSearchContext,
                 status: { [weak self] message in
                     await MainActor.run {
                         if let message {
@@ -227,7 +243,8 @@ class AppState: ObservableObject {
             endpoint: apiEndpoint,
             model: selectedModel,
             persona: persona,
-            messages: messages
+            messages: messages,
+            webSearchContext: webSearchContext
         )
     }
 
