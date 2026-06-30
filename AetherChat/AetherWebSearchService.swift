@@ -18,10 +18,10 @@ struct AetherWebSearchService: Sendable {
             return AetherWebSearchResult(query: cleaned, context: "")
         }
 
-        var components = URLComponents(string: "https://r.jina.ai/http://www.bing.com/search")!
+        let searchQuery = Self.enhancedQuery(cleaned)
+        var components = URLComponents(string: "https://r.jina.ai/http://lite.duckduckgo.com/lite/")!
         components.queryItems = [
-            URLQueryItem(name: "q", value: cleaned),
-            URLQueryItem(name: "setlang", value: "en-US")
+            URLQueryItem(name: "q", value: searchQuery)
         ]
         guard let url = components.url else {
             return AetherWebSearchResult(query: cleaned, context: "")
@@ -39,9 +39,18 @@ struct AetherWebSearchService: Sendable {
         let raw = String(data: data, encoding: .utf8) ?? ""
         let context = Self.formatContext(
             query: cleaned,
-            body: Self.extractContext(from: raw, maxCharacters: maxCharacters)
+            searchQuery: searchQuery,
+            documents: Self.rankedDocuments(from: raw),
+            fallbackBody: Self.extractContext(from: raw, maxCharacters: maxCharacters)
         )
         return AetherWebSearchResult(query: cleaned, context: context)
+    }
+
+    private static func enhancedQuery(_ query: String) -> String {
+        let lowercased = query.lowercased()
+        let isMarketQuery = ["ipo", "stock", "ticker", "public", "nasdaq", "nyse", "shares"].contains { lowercased.contains($0) }
+        guard isMarketQuery else { return query }
+        return "\(query) SEC Nasdaq Reuters"
     }
 
     private static func extractContext(from raw: String, maxCharacters: Int) -> String {
@@ -57,15 +66,170 @@ struct AetherWebSearchService: Sendable {
         return String(body.prefix(maxCharacters))
     }
 
-    private static func formatContext(query: String, body: String) -> String {
-        let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
+    private static func formatContext(
+        query: String,
+        searchQuery: String,
+        documents: [AetherSearchDocument],
+        fallbackBody: String
+    ) -> String {
+        if !documents.isEmpty {
+            let resultText = documents.prefix(6).enumerated().map { index, document in
+                """
+                [\(index + 1)] \(document.title)
+                Source: \(document.source)
+                URL: \(document.url)
+                Snippet: \(document.snippet)
+                """
+            }.joined(separator: "\n\n")
+
+            return """
+            Web search was performed for: \(query)
+            Search query used: \(searchQuery)
+
+            Grounding rules:
+            - Prefer higher-ranked sources first. Reuters, SEC, Nasdaq, AP, CNBC, Yahoo Finance, and official company/investor pages outrank SEO blogs, ads, and anonymous trackers.
+            - For public-company, IPO, ticker, stock, price, and date questions, answer only what these sources explicitly support.
+            - If sources conflict, say that the results conflict and summarize the strongest source rather than inventing a compromise.
+            - Do not repeat claims from sponsored links or low-ranked snippets when a higher-ranked source disagrees.
+
+            Ranked search results:
+            \(resultText)
+            """
+        }
+
+        let trimmed = fallbackBody.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return "" }
         return """
         Web search was performed for: \(query)
+        Search query used: \(searchQuery)
+
+        Grounding rules:
+        - Answer only facts explicitly present in the search text below.
+        - If the search text is noisy or contradictory, say that and avoid inventing dates, tickers, prices, or amounts.
 
         Search results:
         \(trimmed)
         """
+    }
+
+    private static func rankedDocuments(from raw: String) -> [AetherSearchDocument] {
+        let body = extractContext(from: raw, maxCharacters: 16_000)
+        let lines = body
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+        var documents = [AetherSearchDocument]()
+        var currentTitle: String?
+        var currentURL: String?
+        var currentSnippet = [String]()
+
+        func flush() {
+            guard let title = currentTitle, let url = currentURL else {
+                currentTitle = nil
+                currentURL = nil
+                currentSnippet.removeAll()
+                return
+            }
+
+            let snippet = cleanMarkdown(currentSnippet.joined(separator: " "))
+            let document = AetherSearchDocument(title: cleanMarkdown(title), url: decodedResultURL(url), snippet: snippet)
+            if document.isUsable {
+                documents.append(document)
+            }
+            currentTitle = nil
+            currentURL = nil
+            currentSnippet.removeAll()
+        }
+
+        let pattern = #"^\d+\.\s*(?:##\s*)?\[(.+?)\]\((.+?)\)"#
+        let regex = try? NSRegularExpression(pattern: pattern)
+
+        for line in lines where !line.isEmpty {
+            let range = NSRange(line.startIndex..<line.endIndex, in: line)
+            if let match = regex?.firstMatch(in: line, range: range),
+               let titleRange = Range(match.range(at: 1), in: line),
+               let urlRange = Range(match.range(at: 2), in: line) {
+                flush()
+                currentTitle = String(line[titleRange])
+                currentURL = String(line[urlRange])
+            } else if currentTitle != nil {
+                currentSnippet.append(line)
+            }
+        }
+        flush()
+
+        return documents
+            .sorted { left, right in
+                if left.score == right.score {
+                    return left.title < right.title
+                }
+                return left.score > right.score
+            }
+    }
+
+    private static func decodedResultURL(_ raw: String) -> String {
+        guard let components = URLComponents(string: raw),
+              let encodedURL = components.queryItems?.first(where: { $0.name == "uddg" })?.value,
+              let decoded = encodedURL.removingPercentEncoding else {
+            return raw
+        }
+        return decoded
+    }
+
+    private static func cleanMarkdown(_ text: String) -> String {
+        text
+            .replacingOccurrences(of: "**", with: "")
+            .replacingOccurrences(of: #"\[(.*?)\]\(.*?\)"#, with: "$1", options: .regularExpression)
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+private struct AetherSearchDocument: Sendable {
+    let title: String
+    let url: String
+    let snippet: String
+
+    var source: String {
+        guard let host = URL(string: url)?.host else { return url }
+        return host.replacingOccurrences(of: "www.", with: "")
+    }
+
+    var isUsable: Bool {
+        let combined = "\(title) \(snippet) \(source)".lowercased()
+        guard !combined.contains("sponsored link"), !combined.contains("viewing ads") else {
+            return false
+        }
+        return !title.isEmpty && !url.isEmpty && !snippet.isEmpty
+    }
+
+    var score: Int {
+        let host = source.lowercased()
+        let combined = "\(title) \(snippet)".lowercased()
+        var value = 0
+
+        if host.hasSuffix("sec.gov") { value += 120 }
+        if host.hasSuffix("reuters.com") { value += 110 }
+        if host.hasSuffix("nasdaq.com") { value += 100 }
+        if host.hasSuffix("apnews.com") { value += 95 }
+        if host.hasSuffix("cnbc.com") { value += 85 }
+        if host.hasSuffix("finance.yahoo.com") { value += 80 }
+        if host.hasSuffix("abcnews.com") { value += 70 }
+        if host.hasSuffix("investors.com") { value += 65 }
+        if host.hasSuffix("forbes.com") { value += 45 }
+        if host.hasSuffix("wikipedia.org") { value += 30 }
+
+        if combined.contains("sec") { value += 16 }
+        if combined.contains("nasdaq") || combined.contains("nyse") { value += 14 }
+        if combined.contains("ticker") { value += 10 }
+        if combined.contains(" ipo") || combined.contains("initial public offering") { value += 10 }
+        if combined.contains("priced") || combined.contains("completed") || combined.contains("raised") { value += 8 }
+        if combined.contains("preparing") || combined.contains("expected") || combined.contains("could") || combined.contains("plans") {
+            value -= 8
+        }
+        if host.contains("duckduckgo.com") || host.contains("clickguard") { value -= 100 }
+
+        return value
     }
 }
 
