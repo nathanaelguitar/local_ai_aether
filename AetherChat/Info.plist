@@ -29,6 +29,8 @@
 	<string>Aether uses the camera so you can attach photos to a chat.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Aether uses your photo library so you can attach images to a chat.</string>
+	<key>AETHER_APP_STORE_URL</key>
+	<string></string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

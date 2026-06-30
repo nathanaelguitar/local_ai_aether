@@ -307,7 +307,7 @@ struct MessageBubble: View {
                         .buttonStyle(.plain)
 
                         Button {
-                            sharePayload = SharePayload(text: message.content)
+                            sharePayload = SharePayload(messageText: message.content)
                         } label: {
                             Image(systemName: "square.and.arrow.up")
                                 .font(.system(size: 12, weight: .semibold))
@@ -347,7 +347,7 @@ struct MessageBubble: View {
         .padding(.horizontal, 16)
         .textSelection(.enabled)
         .sheet(item: $sharePayload) { payload in
-            ActivityView(items: [payload.text])
+            ActivityView(items: payload.activityItems)
         }
         .onDisappear {
             if isSpeaking {
@@ -518,7 +518,26 @@ struct CodeBlockView: View {
 
 struct SharePayload: Identifiable {
     let id = UUID()
-    let text: String
+    let messageText: String
+
+    var activityItems: [Any] {
+        [AetherShare.messageText(messageText)]
+    }
+}
+
+enum AetherShare {
+    static var appStoreURL: URL? {
+        guard let rawURL = (Bundle.main.object(forInfoDictionaryKey: "AETHER_APP_STORE_URL") as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !rawURL.isEmpty else {
+            return nil
+        }
+        return URL(string: rawURL)
+    }
+
+    static func messageText(_ text: String) -> String {
+        guard let appStoreURL else { return text }
+        return "\(text)\n\nShared from Aether: \(appStoreURL.absoluteString)"
+    }
 }
 
 struct ActivityView: UIViewControllerRepresentable {
@@ -549,9 +568,21 @@ final class AetherSpeechController: NSObject, AVSpeechSynthesizerDelegate, @unch
             .replacingOccurrences(of: #"\*\*(.*?)\*\*"#, with: "$1", options: .regularExpression)
             .replacingOccurrences(of: #"\[(.*?)\]\(.*?\)"#, with: "$1", options: .regularExpression)
         let utterance = AVSpeechUtterance(string: cleaned)
-        utterance.voice = AVSpeechSynthesisVoice(language: AVSpeechSynthesisVoice.currentLanguageCode())
+        utterance.voice = preferredVoice()
         utterance.rate = AVSpeechUtteranceDefaultSpeechRate
         synthesizer.speak(utterance)
+    }
+
+    private func preferredVoice() -> AVSpeechSynthesisVoice? {
+        let currentLanguage = AVSpeechSynthesisVoice.currentLanguageCode()
+        let voices = AVSpeechSynthesisVoice.speechVoices()
+        if let currentMale = voices.first(where: { $0.language == currentLanguage && $0.gender == .male }) {
+            return currentMale
+        }
+        if let englishMale = voices.first(where: { $0.language.hasPrefix("en") && $0.gender == .male }) {
+            return englishMale
+        }
+        return AVSpeechSynthesisVoice(language: currentLanguage)
     }
 
     func stop() {
