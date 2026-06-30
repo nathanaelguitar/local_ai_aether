@@ -3,6 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @EnvironmentObject var state: AppState
     @Environment(\.dismiss) var dismiss
+    @State private var showingAssistantSheet = false
 
     var body: some View {
         NavigationStack {
@@ -11,9 +12,15 @@ struct SettingsView: View {
                     VStack(spacing: 20) {
                         // Appearance
                         SettingsSection(title: "Appearance") {
-                            SettingsSwitchRow(icon: "moon.fill", title: "Dark Mode",
-                                              subtitle: "Oak-toned dark theme",
-                                              isOn: $state.isDarkTheme)
+                            VStack(spacing: 0) {
+                                SettingsSwitchRowContent(icon: "moon.fill", title: "Dark Mode",
+                                                         subtitle: "Oak-toned dark theme",
+                                                         isOn: $state.isDarkTheme)
+                                Divider().padding(.leading, 56)
+                                FontSizeSettingsRow(fontScale: $state.messageFontScale)
+                            }
+                            .background(Color(UIColor.secondarySystemBackground))
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                         }
 
                         // Default workspace
@@ -51,6 +58,14 @@ struct SettingsView: View {
                                 SettingsInfoRow(icon: "cpu", title: "Model", subtitle: AetherModelCatalog.aetherV1DisplayName)
                                 Divider().padding(.leading, 56)
                                 SettingsInfoRow(icon: "iphone.gen3", title: "Inference", subtitle: "On device")
+                                Divider().padding(.leading, 56)
+                                SettingsNavRow(
+                                    icon: "person.crop.circle.badge.gearshape",
+                                    title: "Custom Assistant",
+                                    subtitle: state.customSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Default Aether behavior" : "Custom prompt enabled"
+                                ) {
+                                    showingAssistantSheet = true
+                                }
                             }
                             .background(Color(UIColor.secondarySystemBackground))
                             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -96,6 +111,13 @@ struct SettingsView: View {
             }
         }
         .preferredColorScheme(state.isDarkTheme ? .dark : .light)
+        .sheet(isPresented: $showingAssistantSheet) {
+            CustomAssistantSheet(
+                name: $state.customAssistantName,
+                prompt: $state.customSystemPrompt,
+                isDark: state.isDarkTheme
+            )
+        }
         .onAppear {
             state.inferenceProvider = .onDevice
             state.selectedModel = AetherModelCatalog.aetherV1DisplayName
@@ -127,6 +149,19 @@ struct SettingsSwitchRow: View {
     @Binding var isOn: Bool
 
     var body: some View {
+        SettingsSwitchRowContent(icon: icon, title: title, subtitle: subtitle, isOn: $isOn)
+            .background(Color(UIColor.secondarySystemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
+
+struct SettingsSwitchRowContent: View {
+    let icon: String
+    let title: String
+    let subtitle: String
+    @Binding var isOn: Bool
+
+    var body: some View {
         HStack(spacing: 14) {
             Image(systemName: icon)
                 .frame(width: 28)
@@ -141,8 +176,49 @@ struct SettingsSwitchRow: View {
                 .tint(AetherColors.oakMedium)
         }
         .padding(16)
-        .background(Color(UIColor.secondarySystemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
+
+struct FontSizeSettingsRow: View {
+    @Binding var fontScale: Double
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 14) {
+                Image(systemName: "textformat.size")
+                    .frame(width: 28)
+                    .foregroundColor(AetherColors.oakMedium)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Chat Text Size")
+                        .font(.system(size: 15, weight: .medium))
+                    Text(label)
+                        .font(.system(size: 12))
+                        .foregroundColor(AetherColors.warmGray500)
+                }
+                Spacer()
+                Text("\(Int(fontScale * 100))%")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(AetherColors.oakMedium)
+            }
+            Slider(value: $fontScale, in: 0.85...1.35, step: 0.05)
+                .tint(AetherColors.oakMedium)
+                .padding(.leading, 42)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+    }
+
+    private var label: String {
+        switch fontScale {
+        case ..<0.95:
+            return "Compact"
+        case 0.95..<1.1:
+            return "Standard"
+        case 1.1..<1.25:
+            return "Large"
+        default:
+            return "Extra large"
+        }
     }
 }
 
@@ -271,6 +347,83 @@ struct ModelConfigSheet: View {
         }
         .onAppear {
             temp = model
+        }
+    }
+}
+
+struct CustomAssistantSheet: View {
+    @Binding var name: String
+    @Binding var prompt: String
+    let isDark: Bool
+    @Environment(\.dismiss) var dismiss
+    @State private var draftName = ""
+    @State private var draftPrompt = ""
+
+    var body: some View {
+        NavigationStack {
+            OakBackground {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 18) {
+                        SettingsSection(title: "Identity") {
+                            VStack(alignment: .leading, spacing: 8) {
+                                TextField("Assistant name, e.g. Grove", text: $draftName)
+                                    .textInputAutocapitalization(.words)
+                                    .padding(12)
+                                    .background(Color(UIColor.secondarySystemBackground))
+                                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                Text("Leave blank to keep using each conversation's selected assistant name.")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(AetherColors.warmGray500)
+                            }
+                        }
+
+                        SettingsSection(title: "System Prompt") {
+                            VStack(alignment: .leading, spacing: 8) {
+                                TextEditor(text: $draftPrompt)
+                                    .frame(minHeight: 180)
+                                    .padding(8)
+                                    .scrollContentBackground(.hidden)
+                                    .background(Color(UIColor.secondarySystemBackground))
+                                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                Text("Use this for persistent style and behavior, such as tone, formatting preferences, or a specialized role. Web grounding and safety rules still take priority.")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(AetherColors.warmGray500)
+                            }
+                        }
+
+                        Button(role: .destructive) {
+                            draftName = ""
+                            draftPrompt = ""
+                        } label: {
+                            Label("Clear Custom Assistant", systemImage: "trash")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(AetherColors.error)
+                    }
+                    .padding(16)
+                }
+            }
+            .navigationTitle("Custom Assistant")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Save") {
+                        name = draftName.trimmingCharacters(in: .whitespacesAndNewlines)
+                        prompt = draftPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+                        dismiss()
+                    }
+                    .foregroundColor(AetherColors.oakMedium)
+                }
+            }
+        }
+        .preferredColorScheme(isDark ? .dark : .light)
+        .onAppear {
+            draftName = name
+            draftPrompt = prompt
         }
     }
 }

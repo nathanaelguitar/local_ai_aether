@@ -131,6 +131,15 @@ class AppState: ObservableObject {
     @Published var generationStatusMessage: String?
     @Published var appIsActive = true
     @Published var defaultWorkspace: Workspace = .personal
+    @Published var messageFontScale: Double = UserDefaults.standard.double(forKey: "messageFontScale") == 0 ? 1.0 : UserDefaults.standard.double(forKey: "messageFontScale") {
+        didSet { UserDefaults.standard.set(messageFontScale, forKey: "messageFontScale") }
+    }
+    @Published var customAssistantName: String = UserDefaults.standard.string(forKey: "customAssistantName") ?? "" {
+        didSet { UserDefaults.standard.set(customAssistantName, forKey: "customAssistantName") }
+    }
+    @Published var customSystemPrompt: String = UserDefaults.standard.string(forKey: "customSystemPrompt") ?? "" {
+        didSet { UserDefaults.standard.set(customSystemPrompt, forKey: "customSystemPrompt") }
+    }
     private let backend = AetherBackendClient()
     private let onDevice = AetherOnDeviceClient()
     private let webSearch = AetherWebSearchService()
@@ -197,7 +206,9 @@ class AppState: ObservableObject {
             let response = try await generateReply(
                 persona: persona,
                 messages: messageSnapshot,
-                webSearchContext: webSearchContext
+                webSearchContext: webSearchContext,
+                customAssistantName: customAssistantName,
+                customSystemPrompt: customSystemPrompt
             )
             modelLoadingMessage = nil
             generationStatusMessage = nil
@@ -217,12 +228,20 @@ class AppState: ObservableObject {
         }
     }
 
-    private func generateReply(persona: AssistantPersona, messages: [ChatMessage], webSearchContext: String? = nil) async throws -> String {
+    private func generateReply(
+        persona: AssistantPersona,
+        messages: [ChatMessage],
+        webSearchContext: String? = nil,
+        customAssistantName: String = "",
+        customSystemPrompt: String = ""
+    ) async throws -> String {
         if selectedModel == AetherModelCatalog.aetherV1DisplayName {
             return try await onDevice.send(
                 persona: persona,
                 messages: messages,
                 webSearchContext: webSearchContext,
+                customAssistantName: customAssistantName,
+                customSystemPrompt: customSystemPrompt,
                 status: { [weak self] message in
                     await MainActor.run {
                         if let message {
@@ -245,7 +264,9 @@ class AppState: ObservableObject {
             model: selectedModel,
             persona: persona,
             messages: messages,
-            webSearchContext: webSearchContext
+            webSearchContext: webSearchContext,
+            customAssistantName: customAssistantName,
+            customSystemPrompt: customSystemPrompt
         )
     }
 

@@ -15,11 +15,19 @@ actor AetherOnDeviceClient {
         persona: AssistantPersona,
         messages: [ChatMessage],
         webSearchContext: String? = nil,
+        customAssistantName: String = "",
+        customSystemPrompt: String = "",
         status: StatusHandler? = nil
     ) async throws -> String {
         #if canImport(LlamaSwift)
         let modelFiles = try await AetherModelStore.localAetherV1Files(status: status)
-        let prompt = AetherPromptBuilder.prompt(persona: persona, messages: messages, webSearchContext: webSearchContext)
+        let prompt = AetherPromptBuilder.prompt(
+            persona: persona,
+            messages: messages,
+            webSearchContext: webSearchContext,
+            customAssistantName: customAssistantName,
+            customSystemPrompt: customSystemPrompt
+        )
         let promptAttachments = AetherPromptBuilder.promptMessages(from: messages).flatMap(\.attachments).filter(\.isImage)
 
         for attempt in 0...1 {
@@ -208,9 +216,22 @@ enum AetherPromptBuilder {
         return Array(recent)
     }
 
-    static func prompt(persona: AssistantPersona, messages: [ChatMessage], webSearchContext: String? = nil) -> String {
+    static func prompt(
+        persona: AssistantPersona,
+        messages: [ChatMessage],
+        webSearchContext: String? = nil,
+        customAssistantName: String = "",
+        customSystemPrompt: String = ""
+    ) -> String {
+        let assistantName = customAssistantName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? persona.name
+            : customAssistantName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let customInstructions = customSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         var prompt = "<|im_start|>system\n"
-        prompt += "You are \(persona.name), \(persona.description). Current date: \(Self.currentDateString()). Reply clearly and concisely. Do not expose hidden reasoning."
+        prompt += "You are \(assistantName), \(persona.description). Current date: \(Self.currentDateString()). Reply clearly and concisely. Do not expose hidden reasoning."
+        if !customInstructions.isEmpty {
+            prompt += "\nUser-defined assistant instructions:\n\(customInstructions)\nFollow these instructions for style, role, and behavior unless they conflict with grounding rules or user safety."
+        }
         prompt += "<|im_end|>\n"
 
         if let webSearchContext, !webSearchContext.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {

@@ -14,7 +14,9 @@ struct AetherBackendClient: Sendable {
         model: String,
         persona: AssistantPersona,
         messages: [ChatMessage],
-        webSearchContext: String? = nil
+        webSearchContext: String? = nil,
+        customAssistantName: String = "",
+        customSystemPrompt: String = ""
     ) async throws -> String {
         var request = URLRequest(url: try chatURL(from: endpoint))
         request.httpMethod = "POST"
@@ -23,7 +25,13 @@ struct AetherBackendClient: Sendable {
         request.httpBody = try encoder.encode(
             ChatCompletionRequest(
                 model: model,
-                messages: makeMessages(persona: persona, messages: messages, webSearchContext: webSearchContext),
+                messages: makeMessages(
+                    persona: persona,
+                    messages: messages,
+                    webSearchContext: webSearchContext,
+                    customAssistantName: customAssistantName,
+                    customSystemPrompt: customSystemPrompt
+                ),
                 temperature: 0.8,
                 maxTokens: 1024,
                 stream: false
@@ -67,10 +75,24 @@ struct AetherBackendClient: Sendable {
         return url
     }
 
-    private func makeMessages(persona: AssistantPersona, messages: [ChatMessage], webSearchContext: String? = nil) -> [OpenAIRequestMessage] {
+    private func makeMessages(
+        persona: AssistantPersona,
+        messages: [ChatMessage],
+        webSearchContext: String? = nil,
+        customAssistantName: String = "",
+        customSystemPrompt: String = ""
+    ) -> [OpenAIRequestMessage] {
+        let assistantName = customAssistantName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? persona.name
+            : customAssistantName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let customInstructions = customSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        var systemText = "You are \(assistantName), \(persona.description). Current date: \(Self.currentDateString()). Reply in a grounded, helpful tone."
+        if !customInstructions.isEmpty {
+            systemText += "\nUser-defined assistant instructions:\n\(customInstructions)\nFollow these instructions for style, role, and behavior unless they conflict with grounding rules or user safety."
+        }
         let system = OpenAIRequestMessage(
             role: "system",
-            content: .text("You are \(persona.name), \(persona.description). Current date: \(Self.currentDateString()). Reply in a grounded, helpful tone.")
+            content: .text(systemText)
         )
         var requestMessages = [system]
         if let webSearchContext, !webSearchContext.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {

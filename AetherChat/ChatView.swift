@@ -3,6 +3,7 @@ import PhotosUI
 import UIKit
 import UniformTypeIdentifiers
 import PDFKit
+import AVFoundation
 
 struct ChatView: View {
     @EnvironmentObject var state: AppState
@@ -37,7 +38,7 @@ struct ChatView: View {
                                                    isDark: state.isDarkTheme)
                                 }
                                 ForEach(conversation?.messages ?? []) { msg in
-                                    MessageBubble(message: msg, isDark: state.isDarkTheme)
+                                    MessageBubble(message: msg, isDark: state.isDarkTheme, fontScale: state.messageFontScale)
                                         .id(msg.id)
                                 }
                                 if isSending && state.modelLoadingMessage == nil {
@@ -269,11 +270,14 @@ struct ModelLoadingOverlay: View {
 struct MessageBubble: View {
     let message: ChatMessage
     let isDark: Bool
+    let fontScale: Double
     @State private var copiedMessage = false
-    @State private var shareText = ""
-    @State private var showingShareSheet = false
+    @State private var sharePayload: SharePayload?
+    @State private var isSpeaking = false
+    private let speech = AetherSpeechController.shared
 
     var isUser: Bool { message.role == .user }
+    var fontSize: CGFloat { 15 * fontScale }
 
     var body: some View {
         HStack(alignment: .bottom) {
@@ -303,10 +307,29 @@ struct MessageBubble: View {
                         .buttonStyle(.plain)
 
                         Button {
-                            shareText = message.content
-                            showingShareSheet = true
+                            sharePayload = SharePayload(text: message.content)
                         } label: {
                             Image(systemName: "square.and.arrow.up")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(AetherColors.oakMedium)
+                                .frame(width: 28, height: 28)
+                                .background((isDark ? AetherColors.warmGray800 : Color.white).opacity(0.82))
+                                .clipShape(Circle())
+                        }
+                        .buttonStyle(.plain)
+
+                        Button {
+                            if isSpeaking {
+                                speech.stop()
+                                isSpeaking = false
+                            } else {
+                                speech.speak(message.content) {
+                                    isSpeaking = false
+                                }
+                                isSpeaking = true
+                            }
+                        } label: {
+                            Image(systemName: isSpeaking ? "speaker.wave.2.fill" : "speaker.wave.2")
                                 .font(.system(size: 12, weight: .semibold))
                                 .foregroundColor(AetherColors.oakMedium)
                                 .frame(width: 28, height: 28)
@@ -323,8 +346,14 @@ struct MessageBubble: View {
         }
         .padding(.horizontal, 16)
         .textSelection(.enabled)
-        .sheet(isPresented: $showingShareSheet) {
-            ActivityView(items: [shareText])
+        .sheet(item: $sharePayload) { payload in
+            ActivityView(items: [payload.text])
+        }
+        .onDisappear {
+            if isSpeaking {
+                speech.stop()
+                isSpeaking = false
+            }
         }
     }
 
@@ -340,10 +369,10 @@ struct MessageBubble: View {
             if !message.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 if isUser {
                     Text(message.content)
-                        .font(.system(size: 15))
+                        .font(.system(size: fontSize))
                         .foregroundColor(.white)
                 } else {
-                    MarkdownMessageText(message.content, isDark: isDark)
+                    MarkdownMessageText(message.content, isDark: isDark, fontScale: fontScale)
                         .foregroundColor(isDark ? AetherColors.warmGray100 : AetherColors.warmBlack)
                 }
             }
@@ -365,10 +394,12 @@ struct MessageBubble: View {
 struct MarkdownMessageText: View {
     let content: String
     let isDark: Bool
+    let fontScale: Double
 
-    init(_ content: String, isDark: Bool) {
+    init(_ content: String, isDark: Bool, fontScale: Double) {
         self.content = content
         self.isDark = isDark
+        self.fontScale = fontScale
     }
 
     var body: some View {
@@ -377,7 +408,7 @@ struct MarkdownMessageText: View {
                 blockView(block)
             }
         }
-        .font(.system(size: 15))
+        .font(.system(size: scaled(15)))
     }
 
     @ViewBuilder
@@ -385,7 +416,7 @@ struct MarkdownMessageText: View {
         switch block {
         case .heading(let level, let text):
             inlineText(text)
-                .font(.system(size: headingSize(for: level), weight: .semibold))
+                .font(.system(size: scaled(headingSize(for: level)), weight: .semibold))
                 .padding(.top, level == 1 ? 2 : 4)
 
         case .paragraph(let text):
@@ -395,7 +426,7 @@ struct MarkdownMessageText: View {
         case .bullet(let text):
             HStack(alignment: .firstTextBaseline, spacing: 7) {
                 Text("•")
-                    .font(.system(size: 14, weight: .bold))
+                    .font(.system(size: scaled(14), weight: .bold))
                 inlineText(text)
                     .lineSpacing(3)
             }
@@ -403,16 +434,16 @@ struct MarkdownMessageText: View {
         case .numbered(let number, let text):
             HStack(alignment: .firstTextBaseline, spacing: 7) {
                 Text("\(number).")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: scaled(14), weight: .semibold))
                 inlineText(text)
                     .lineSpacing(3)
             }
 
         case .code(let code):
-            CodeBlockView(code: code, isDark: isDark)
+            CodeBlockView(code: code, isDark: isDark, fontScale: fontScale)
 
         case .table(let rows):
-            CodeBlockView(code: rows.joined(separator: "\n"), isDark: isDark)
+            CodeBlockView(code: rows.joined(separator: "\n"), isDark: isDark, fontScale: fontScale)
         }
     }
 
@@ -431,18 +462,23 @@ struct MarkdownMessageText: View {
         default: return 16
         }
     }
+
+    private func scaled(_ size: CGFloat) -> CGFloat {
+        size * fontScale
+    }
 }
 
 struct CodeBlockView: View {
     let code: String
     let isDark: Bool
+    let fontScale: Double
     @State private var copied = false
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
             ScrollView(.horizontal, showsIndicators: true) {
                 Text(code)
-                    .font(.system(size: 13, design: .monospaced))
+                    .font(.system(size: 13 * fontScale, design: .monospaced))
                     .foregroundColor(isDark ? AetherColors.warmGray100 : AetherColors.warmBlack)
                     .lineSpacing(3)
                     .textSelection(.enabled)
@@ -480,6 +516,11 @@ struct CodeBlockView: View {
     }
 }
 
+struct SharePayload: Identifiable {
+    let id = UUID()
+    let text: String
+}
+
 struct ActivityView: UIViewControllerRepresentable {
     let items: [Any]
 
@@ -488,6 +529,48 @@ struct ActivityView: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
+
+final class AetherSpeechController: NSObject, AVSpeechSynthesizerDelegate, @unchecked Sendable {
+    static let shared = AetherSpeechController()
+    private let synthesizer = AVSpeechSynthesizer()
+    private var completion: (() -> Void)?
+
+    override private init() {
+        super.init()
+        synthesizer.delegate = self
+    }
+
+    func speak(_ text: String, completion: @escaping () -> Void) {
+        stop()
+        self.completion = completion
+        let cleaned = text
+            .replacingOccurrences(of: #"`{3}[\s\S]*?`{3}"#, with: " code block omitted ", options: .regularExpression)
+            .replacingOccurrences(of: #"\*\*(.*?)\*\*"#, with: "$1", options: .regularExpression)
+            .replacingOccurrences(of: #"\[(.*?)\]\(.*?\)"#, with: "$1", options: .regularExpression)
+        let utterance = AVSpeechUtterance(string: cleaned)
+        utterance.voice = AVSpeechSynthesisVoice(language: AVSpeechSynthesisVoice.currentLanguageCode())
+        utterance.rate = AVSpeechUtteranceDefaultSpeechRate
+        synthesizer.speak(utterance)
+    }
+
+    func stop() {
+        if synthesizer.isSpeaking {
+            synthesizer.stopSpeaking(at: .immediate)
+        }
+        completion?()
+        completion = nil
+    }
+
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
+        completion?()
+        completion = nil
+    }
+
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
+        completion?()
+        completion = nil
+    }
 }
 
 enum ChatAttachmentLoader {
