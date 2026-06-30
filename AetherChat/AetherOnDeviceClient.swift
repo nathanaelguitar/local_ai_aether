@@ -18,16 +18,27 @@ actor AetherOnDeviceClient {
         status: StatusHandler? = nil
     ) async throws -> String {
         #if canImport(LlamaSwift)
-        try Task.checkCancellation()
         let modelFiles = try await AetherModelStore.localAetherV1Files(status: status)
-        try Task.checkCancellation()
-        await status?("Loading Aether V1 into memory")
-        let engine = try loadEngine(modelURL: modelFiles.modelURL, mmprojURL: modelFiles.mmprojURL)
-        try Task.checkCancellation()
-        await status?(nil)
         let prompt = AetherPromptBuilder.prompt(persona: persona, messages: messages, webSearchContext: webSearchContext)
         let promptAttachments = AetherPromptBuilder.promptMessages(from: messages).flatMap(\.attachments).filter(\.isImage)
-        return try engine.generate(prompt: prompt, attachments: promptAttachments)
+
+        for attempt in 0...1 {
+            do {
+                try Task.checkCancellation()
+                await status?(attempt == 0 ? "Loading Aether V1 into memory" : "Restarting Aether V1")
+                let engine = try loadEngine(modelURL: modelFiles.modelURL, mmprojURL: modelFiles.mmprojURL)
+                try Task.checkCancellation()
+                await status?(nil)
+                return try engine.generate(prompt: prompt, attachments: promptAttachments)
+            } catch {
+                resetEngineIfNeeded(after: error)
+                guard attempt == 0, Self.canRetry(after: error), !Task.isCancelled else {
+                    throw error
+                }
+            }
+        }
+
+        throw AetherOnDeviceError.decodeFailed
         #else
         throw AetherOnDeviceError.llamaUnavailable
         #endif
@@ -41,6 +52,21 @@ actor AetherOnDeviceClient {
         let engine = try AetherLlamaEngine(modelURL: modelURL, mmprojURL: mmprojURL)
         self.engine = engine
         return engine
+    }
+
+    private func resetEngineIfNeeded(after error: Error) {
+        guard Self.canRetry(after: error) else { return }
+        engine = nil
+    }
+
+    private static func canRetry(after error: Error) -> Bool {
+        guard let error = error as? AetherOnDeviceError else { return false }
+        switch error {
+        case .decodeFailed, .emptyResponse, .multimodalDecodeFailed:
+            return true
+        default:
+            return false
+        }
     }
     #endif
 }

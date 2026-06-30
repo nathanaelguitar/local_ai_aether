@@ -210,7 +210,8 @@ class AppState: ObservableObject {
         } catch {
             modelLoadingMessage = nil
             generationStatusMessage = nil
-            let errorMessage = "Inference error: \(inferenceErrorDescription(error))"
+            let errorMessage = localBackgroundInterruptionMessage(for: error)
+                ?? "Inference error: \(inferenceErrorDescription(error))"
             appendAssistantMessage(to: id, content: errorMessage)
             notifyIfNeeded(conversationTitle: conversations.first(where: { $0.id == id })?.title ?? "Aether", response: errorMessage)
         }
@@ -265,6 +266,16 @@ class AppState: ObservableObject {
             return nsError.localizedDescription
         }
         return String(describing: error)
+    }
+
+    private func localBackgroundInterruptionMessage(for error: Error) -> String? {
+        guard !appIsActive, let localError = error as? AetherOnDeviceError else { return nil }
+        switch localError {
+        case .decodeFailed, .emptyResponse, .multimodalDecodeFailed:
+            return "Aether was interrupted while running local inference in the background. The local model has been reset; please resend the message."
+        default:
+            return nil
+        }
     }
 
     private func notifyIfNeeded(conversationTitle: String, response: String) {
