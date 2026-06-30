@@ -50,7 +50,7 @@ struct AetherWebSearchService: Sendable {
         let lowercased = query.lowercased()
         let isMarketQuery = ["ipo", "stock", "ticker", "public", "nasdaq", "nyse", "shares"].contains { lowercased.contains($0) }
         guard isMarketQuery else { return query }
-        return "\(query) SEC Nasdaq Reuters"
+        return "\(query) SEC Nasdaq Reuters completed priced raised trading latest"
     }
 
     private static func extractContext(from raw: String, maxCharacters: Int) -> String {
@@ -85,10 +85,12 @@ struct AetherWebSearchService: Sendable {
             return """
             Web search was performed for: \(query)
             Search query used: \(searchQuery)
+            Current date: \(Self.currentDateString()).
 
             Grounding rules:
             - Prefer higher-ranked sources first. Reuters, SEC, Nasdaq, AP, CNBC, Yahoo Finance, and official company/investor pages outrank SEO blogs, ads, and anonymous trackers.
             - For public-company, IPO, ticker, stock, price, and date questions, answer only what these sources explicitly support.
+            - Treat "planned", "targeted", "expected", and "projected" claims as stale when stronger sources say the event priced, raised money, listed, began trading, or completed.
             - If sources conflict, say that the results conflict and summarize the strongest source rather than inventing a compromise.
             - Do not repeat claims from sponsored links or low-ranked snippets when a higher-ranked source disagrees.
 
@@ -102,6 +104,7 @@ struct AetherWebSearchService: Sendable {
         return """
         Web search was performed for: \(query)
         Search query used: \(searchQuery)
+        Current date: \(Self.currentDateString()).
 
         Grounding rules:
         - Answer only facts explicitly present in the search text below.
@@ -183,6 +186,14 @@ struct AetherWebSearchService: Sendable {
             .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
+
+    private static func currentDateString(date: Date = Date()) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateStyle = .long
+        formatter.timeStyle = .none
+        return formatter.string(from: date)
+    }
 }
 
 private struct AetherSearchDocument: Sendable {
@@ -223,9 +234,11 @@ private struct AetherSearchDocument: Sendable {
         if combined.contains("nasdaq") || combined.contains("nyse") { value += 14 }
         if combined.contains("ticker") { value += 10 }
         if combined.contains(" ipo") || combined.contains("initial public offering") { value += 10 }
-        if combined.contains("priced") || combined.contains("completed") || combined.contains("raised") { value += 8 }
-        if combined.contains("preparing") || combined.contains("expected") || combined.contains("could") || combined.contains("plans") {
-            value -= 8
+        if combined.contains("priced") || combined.contains("completed") || combined.contains("raised") || combined.contains("went public") || combined.contains("began trading") || combined.contains("closed") {
+            value += 28
+        }
+        if combined.contains("preparing") || combined.contains("expected") || combined.contains("could") || combined.contains("plans") || combined.contains("planned") || combined.contains("projected") || combined.contains("target") || combined.contains("aims") || combined.contains("set to") {
+            value -= 24
         }
         if host.contains("duckduckgo.com") || host.contains("clickguard") { value -= 100 }
 
