@@ -540,7 +540,67 @@ final class AetherLlamaEngine {
             output.removeSubrange(range.lowerBound..<output.endIndex)
         }
         output = output.replacingOccurrences(of: "<think>", with: "")
+        output = stripLeakedSystemContext(from: output)
         return output.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func stripLeakedSystemContext(from text: String) -> String {
+        var output = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let leakMarkers = [
+            "Aether has already searched the web for this turn.",
+            "I have already searched the web for this turn.",
+            "Web search was performed for:",
+            "Search query used:",
+            "Grounding rules:",
+            "Ranked search results:"
+        ]
+
+        guard leakMarkers.contains(where: { output.localizedCaseInsensitiveContains($0) }) else {
+            return output
+        }
+
+        let lines = output.components(separatedBy: .newlines)
+        var kept = [String]()
+        var skipping = false
+
+        for rawLine in lines {
+            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            let lowercased = line.lowercased()
+            let startsLeakBlock = leakMarkers.contains { lowercased.hasPrefix($0.lowercased()) }
+
+            if startsLeakBlock {
+                skipping = true
+                continue
+            }
+
+            if skipping {
+                let looksLikeAnswerStart =
+                    lowercased.hasPrefix("yes") ||
+                    lowercased.hasPrefix("no") ||
+                    lowercased.hasPrefix("according") ||
+                    lowercased.hasPrefix("based on") ||
+                    lowercased.hasPrefix("spacex") ||
+                    lowercased.hasPrefix("the ") ||
+                    lowercased.hasPrefix("sources") ||
+                    lowercased.hasPrefix("[1]")
+
+                if looksLikeAnswerStart, !lowercased.contains("ranked search results") {
+                    skipping = false
+                    kept.append(rawLine)
+                }
+                continue
+            }
+
+            kept.append(rawLine)
+        }
+
+        output = kept.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if output.isEmpty, let range = text.range(of: "Ranked search results:", options: .caseInsensitive) {
+            output = String(text[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        return output
     }
 }
 #endif
