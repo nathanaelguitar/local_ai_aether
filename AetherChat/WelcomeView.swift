@@ -52,8 +52,8 @@ struct WelcomeView: View {
                     VStack(spacing: 20) {
                         FeatureRow(icon: "🔒", title: "Privacy First",
                                    subtitle: "Aether V1 runs locally on your iPhone by default")
-                        FeatureRow(icon: "🌿", title: "Lower-Impact AI",
-                                   subtitle: "Use the model already in your hand instead of a data center for every reply")
+                        FeatureRow(icon: "🌿", title: "Eco-Friendly AI",
+                                   subtitle: "Use the model already in your hand instead of a data center")
                         FeatureRow(icon: "🌳", title: "Organized by Workspace",
                                    subtitle: "Separate Personal, Work, Creative, and Research conversations")
                     }
