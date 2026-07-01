@@ -196,6 +196,37 @@ class AppState: ObservableObject {
 
         let persona = conversations[idx].persona
         let messageSnapshot = conversations[idx].messages
+        await generateAndAppendReply(to: id, persona: persona, messageSnapshot: messageSnapshot, priorMessages: priorMessages, latestUserText: text)
+    }
+
+    func regenerateLastResponse(in id: UUID) async {
+        guard let idx = conversations.firstIndex(where: { $0.id == id }) else { return }
+        guard let lastAssistantIndex = conversations[idx].messages.lastIndex(where: { $0.role == .assistant }) else { return }
+        let promptMessages = Array(conversations[idx].messages.prefix(upTo: lastAssistantIndex))
+        guard let lastUserIndex = promptMessages.lastIndex(where: { $0.role == .user }) else { return }
+        let latestUser = promptMessages[lastUserIndex]
+        conversations[idx].messages.removeSubrange(lastAssistantIndex...)
+        conversations[idx].previewText = latestUser.content.isEmpty ? attachmentPreview(for: latestUser.attachments) : latestUser.content
+        conversations[idx].updatedAt = Date()
+
+        let persona = conversations[idx].persona
+        let priorMessages = Array(promptMessages.prefix(upTo: lastUserIndex))
+        await generateAndAppendReply(
+            to: id,
+            persona: persona,
+            messageSnapshot: promptMessages,
+            priorMessages: priorMessages,
+            latestUserText: latestUser.content
+        )
+    }
+
+    private func generateAndAppendReply(
+        to id: UUID,
+        persona: AssistantPersona,
+        messageSnapshot: [ChatMessage],
+        priorMessages: [ChatMessage],
+        latestUserText: String
+    ) async {
         let task = AetherBackgroundTask.begin(name: "Aether V1 inference") { [weak self] in
             Task { @MainActor in
                 self?.modelLoadingMessage = nil
@@ -208,7 +239,7 @@ class AppState: ObservableObject {
             generationStatusMessage = messageSnapshot.contains(where: { !$0.attachments.isEmpty })
                 ? "Reading attachments and the conversation"
                 : "Reading the conversation"
-            let webQuery = AetherWebSearchIntent.query(from: text, previousMessages: priorMessages)
+            let webQuery = AetherWebSearchIntent.query(from: latestUserText, previousMessages: priorMessages)
             var webSearchContext: String?
             if let webQuery {
                 generationStatusMessage = "Searching the web"

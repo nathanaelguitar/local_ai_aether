@@ -19,10 +19,15 @@ struct ChatView: View {
     @State private var showingRenameDialog = false
     @State private var titleDraft = ""
     @State private var sendTask: Task<Void, Never>?
+    @State private var sharePayload: SharePayload?
     @FocusState private var inputFocused: Bool
 
     var conversation: Conversation? {
         state.conversations.first { $0.id == conversationId }
+    }
+
+    var latestAssistantMessageId: UUID? {
+        conversation?.messages.last(where: { $0.role == .assistant })?.id
     }
 
     var body: some View {
@@ -38,7 +43,13 @@ struct ChatView: View {
                                                    isDark: state.isDarkTheme)
                                 }
                                 ForEach(conversation?.messages ?? []) { msg in
-                                    MessageBubble(message: msg, isDark: state.isDarkTheme, fontScale: state.messageFontScale)
+                                    MessageBubble(
+                                        message: msg,
+                                        isDark: state.isDarkTheme,
+                                        fontScale: state.messageFontScale,
+                                        canRegenerate: msg.id == latestAssistantMessageId && !isSending,
+                                        onRegenerate: { regenerate() }
+                                    )
                                         .id(msg.id)
                                 }
                                 if isSending && state.modelLoadingMessage == nil {
@@ -112,13 +123,27 @@ struct ChatView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                if let onNewChat {
-                    Button(action: onNewChat) {
-                        Image(systemName: "plus")
+                HStack(spacing: 14) {
+                    Button {
+                        if let conversation {
+                            sharePayload = SharePayload(conversation: conversation)
+                        }
+                    } label: {
+                        Image(systemName: "square.and.arrow.up")
                             .font(.system(size: 16, weight: .semibold))
                     }
                     .buttonStyle(.plain)
                     .foregroundColor(AetherColors.oakMedium)
+                    .disabled(conversation == nil || conversation?.messages.isEmpty == true)
+
+                    if let onNewChat {
+                        Button(action: onNewChat) {
+                            Image(systemName: "plus")
+                                .font(.system(size: 16, weight: .semibold))
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundColor(AetherColors.oakMedium)
+                    }
                 }
             }
             ToolbarItem(placement: .principal) {
@@ -148,6 +173,9 @@ struct ChatView: View {
         } message: {
             Text("Leave it blank to keep it as Untitled.")
         }
+        .sheet(item: $sharePayload) { payload in
+            ActivityView(items: payload.activityItems)
+        }
         .preferredColorScheme(state.isDarkTheme ? .dark : .light)
     }
 
@@ -174,6 +202,19 @@ struct ChatView: View {
         isSending = false
         state.modelLoadingMessage = nil
         state.generationStatusMessage = nil
+    }
+
+    func regenerate() {
+        guard !isSending else { return }
+        inputFocused = false
+        isSending = true
+        sendTask = Task {
+            await state.regenerateLastResponse(in: conversationId)
+            if !Task.isCancelled {
+                isSending = false
+                sendTask = nil
+            }
+        }
     }
 
     private func normalizedJPEGData(from data: Data) -> Data? {
@@ -271,9 +312,11 @@ struct MessageBubble: View {
     let message: ChatMessage
     let isDark: Bool
     let fontScale: Double
+    let canRegenerate: Bool
+    let onRegenerate: () -> Void
     @State private var copiedMessage = false
     @State private var sharePayload: SharePayload?
-    @State private var isSpeaking = false
+    @State private var speechState: SpeechPlaybackState = .stopped
     private let speech = AetherSpeechController.shared
 
     var isUser: Bool { message.role == .user }
@@ -319,17 +362,21 @@ struct MessageBubble: View {
                         .buttonStyle(.plain)
 
                         Button {
-                            if isSpeaking {
-                                speech.stop()
-                                isSpeaking = false
-                            } else {
+                            switch speechState {
+                            case .stopped:
                                 speech.speak(message.content) {
-                                    isSpeaking = false
+                                    speechState = .stopped
                                 }
-                                isSpeaking = true
+                                speechState = .playing
+                            case .playing:
+                                speech.pause()
+                                speechState = .paused
+                            case .paused:
+                                speech.resume()
+                                speechState = .playing
                             }
                         } label: {
-                            Image(systemName: isSpeaking ? "speaker.wave.2.fill" : "speaker.wave.2")
+                            Image(systemName: speechState.iconName)
                                 .font(.system(size: 12, weight: .semibold))
                                 .foregroundColor(AetherColors.oakMedium)
                                 .frame(width: 28, height: 28)
@@ -337,6 +384,18 @@ struct MessageBubble: View {
                                 .clipShape(Circle())
                         }
                         .buttonStyle(.plain)
+
+                        if canRegenerate {
+                            Button(action: onRegenerate) {
+                                Image(systemName: "arrow.clockwise")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundColor(AetherColors.oakMedium)
+                                    .frame(width: 28, height: 28)
+                                    .background((isDark ? AetherColors.warmGray800 : Color.white).opacity(0.82))
+                                    .clipShape(Circle())
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
                     .padding(.leading, 2)
                 }
@@ -350,9 +409,9 @@ struct MessageBubble: View {
             ActivityView(items: payload.activityItems)
         }
         .onDisappear {
-            if isSpeaking {
+            if speechState != .stopped {
                 speech.stop()
-                isSpeaking = false
+                speechState = .stopped
             }
         }
     }
@@ -518,10 +577,18 @@ struct CodeBlockView: View {
 
 struct SharePayload: Identifiable {
     let id = UUID()
-    let messageText: String
+    let text: String
+
+    init(messageText: String) {
+        self.text = AetherShare.messageText(messageText)
+    }
+
+    init(conversation: Conversation) {
+        self.text = AetherShare.conversationText(conversation)
+    }
 
     var activityItems: [Any] {
-        [AetherShare.messageText(messageText)]
+        [text]
     }
 }
 
@@ -537,6 +604,38 @@ enum AetherShare {
     static func messageText(_ text: String) -> String {
         guard let appStoreURL else { return text }
         return "\(text)\n\nShared from Aether: \(appStoreURL.absoluteString)"
+    }
+
+    static func conversationText(_ conversation: Conversation) -> String {
+        let transcript = conversation.messages.map { message in
+            let speaker = message.role == .user ? "You" : conversation.persona.name
+            let content = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            let attachmentText = message.attachments.isEmpty
+                ? ""
+                : "\n[Attachments: \(message.attachments.map(\.displayName).joined(separator: ", "))]"
+            return "\(speaker): \(content)\(attachmentText)"
+        }.joined(separator: "\n\n")
+
+        let base = "Aether conversation: \(conversation.title)\nwith \(conversation.persona.name)\n\n\(transcript)"
+        guard let appStoreURL else { return base }
+        return "\(base)\n\nShared from Aether: \(appStoreURL.absoluteString)"
+    }
+}
+
+enum SpeechPlaybackState {
+    case stopped
+    case playing
+    case paused
+
+    var iconName: String {
+        switch self {
+        case .stopped:
+            return "speaker.wave.2"
+        case .playing:
+            return "pause.fill"
+        case .paused:
+            return "play.fill"
+        }
     }
 }
 
@@ -571,6 +670,16 @@ final class AetherSpeechController: NSObject, AVSpeechSynthesizerDelegate, @unch
         utterance.voice = preferredVoice()
         utterance.rate = AVSpeechUtteranceDefaultSpeechRate
         synthesizer.speak(utterance)
+    }
+
+    func pause() {
+        guard synthesizer.isSpeaking else { return }
+        synthesizer.pauseSpeaking(at: .word)
+    }
+
+    func resume() {
+        guard synthesizer.isPaused else { return }
+        synthesizer.continueSpeaking()
     }
 
     private func preferredVoice() -> AVSpeechSynthesisVoice? {
