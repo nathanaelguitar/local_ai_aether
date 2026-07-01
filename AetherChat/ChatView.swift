@@ -123,7 +123,7 @@ struct ChatView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                HStack(spacing: 14) {
+                HStack(spacing: 0) {
                     Button {
                         if let conversation {
                             sharePayload = SharePayload(conversation: conversation)
@@ -131,20 +131,31 @@ struct ChatView: View {
                     } label: {
                         Image(systemName: "square.and.arrow.up")
                             .font(.system(size: 16, weight: .semibold))
+                            .frame(width: 42, height: 40)
                     }
                     .buttonStyle(.plain)
                     .foregroundColor(AetherColors.oakMedium)
                     .disabled(conversation == nil || conversation?.messages.isEmpty == true)
 
                     if let onNewChat {
+                        Divider()
+                            .frame(height: 18)
+                            .overlay(AetherColors.oakMedium.opacity(0.22))
                         Button(action: onNewChat) {
                             Image(systemName: "plus")
                                 .font(.system(size: 16, weight: .semibold))
+                                .frame(width: 42, height: 40)
                         }
                         .buttonStyle(.plain)
                         .foregroundColor(AetherColors.oakMedium)
                     }
                 }
+                .background(.ultraThinMaterial)
+                .clipShape(Capsule())
+                .overlay(
+                    Capsule()
+                        .stroke(AetherColors.oakMedium.opacity(0.18), lineWidth: 1)
+                )
             }
             ToolbarItem(placement: .principal) {
                 Button {
