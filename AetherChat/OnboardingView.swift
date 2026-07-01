@@ -48,10 +48,12 @@ struct OnboardingView: View {
 
                     TextField(placeholder, text: step == 0 ? $userName : $assistantName)
                         .font(.system(size: 18, weight: .medium))
+                        .foregroundColor(AetherColors.warmBlack)
+                        .tint(AetherColors.oakMedium)
                         .textInputAutocapitalization(.words)
                         .padding(.horizontal, 16)
                         .frame(height: 54)
-                        .background(Color.white.opacity(0.84))
+                        .background(Color.white.opacity(0.92))
                         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                         .focused($fieldFocused)
 
@@ -76,6 +78,7 @@ struct OnboardingView: View {
                 .padding(.horizontal, 24)
                 .opacity(visible ? 1 : 0)
                 .offset(y: visible ? 0 : 24)
+                .environment(\.colorScheme, .light)
 
                 Spacer(minLength: 34)
 
