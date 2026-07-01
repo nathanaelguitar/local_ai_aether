@@ -140,6 +140,9 @@ class AppState: ObservableObject {
     @Published var customPersonas: [AssistantPersona] = AppState.loadCustomPersonas() {
         didSet { AppState.saveCustomPersonas(customPersonas) }
     }
+    @Published var customWorkspaces: [Workspace] = AppState.loadCustomWorkspaces() {
+        didSet { AppState.saveCustomWorkspaces(customWorkspaces) }
+    }
     private let backend = AetherBackendClient()
     private let onDevice = AetherOnDeviceClient()
     private let webSearch = AetherWebSearchService()
@@ -150,6 +153,10 @@ class AppState: ObservableObject {
 
     var defaultPersona: AssistantPersona {
         .default
+    }
+
+    var availableWorkspaces: [Workspace] {
+        Workspace.builtIns + customWorkspaces
     }
 
     func togglePin(_ id: UUID) {
@@ -179,6 +186,24 @@ class AppState: ObservableObject {
         )
         customPersonas.append(persona)
         return persona
+    }
+
+    func createWorkspace(name: String) -> Workspace {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let workspace = Workspace.custom(name: trimmedName.isEmpty ? "New Workspace" : trimmedName)
+        customWorkspaces.append(workspace)
+        return workspace
+    }
+
+    func deleteWorkspace(_ workspace: Workspace) {
+        guard !workspace.isBuiltIn else { return }
+        customWorkspaces.removeAll { $0.id == workspace.id }
+        if defaultWorkspace == workspace {
+            defaultWorkspace = .personal
+        }
+        for idx in conversations.indices where conversations[idx].workspace == workspace {
+            conversations[idx].workspace = .personal
+        }
     }
 
     func renameConversation(_ id: UUID, title: String) {
@@ -405,6 +430,16 @@ class AppState: ObservableObject {
     private static func saveCustomPersonas(_ personas: [AssistantPersona]) {
         guard let data = try? JSONEncoder().encode(personas) else { return }
         UserDefaults.standard.set(data, forKey: "customPersonas")
+    }
+
+    private static func loadCustomWorkspaces() -> [Workspace] {
+        guard let data = UserDefaults.standard.data(forKey: "customWorkspaces") else { return [] }
+        return (try? JSONDecoder().decode([Workspace].self, from: data)) ?? []
+    }
+
+    private static func saveCustomWorkspaces(_ workspaces: [Workspace]) {
+        guard let data = try? JSONEncoder().encode(workspaces) else { return }
+        UserDefaults.standard.set(data, forKey: "customWorkspaces")
     }
 
     private func appendAssistantMessage(to id: UUID, content: String) {

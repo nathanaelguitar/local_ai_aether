@@ -26,7 +26,7 @@ struct SettingsView: View {
                         // Default workspace
                         SettingsSection(title: "Default Workspace") {
                             VStack(spacing: 0) {
-                                ForEach(Workspace.allCases) { ws in
+                                ForEach(state.availableWorkspaces) { ws in
                                     Button(action: { state.defaultWorkspace = ws }) {
                                         HStack {
                                             Image(systemName: ws.icon)
@@ -43,7 +43,16 @@ struct SettingsView: View {
                                         .padding(.horizontal, 16)
                                         .padding(.vertical, 12)
                                     }
-                                    if ws != Workspace.allCases.last {
+                                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                        if !ws.isBuiltIn {
+                                            Button(role: .destructive) {
+                                                state.deleteWorkspace(ws)
+                                            } label: {
+                                                Label("Delete", systemImage: "trash")
+                                            }
+                                        }
+                                    }
+                                    if ws != state.availableWorkspaces.last {
                                         Divider().padding(.leading, 56)
                                     }
                                 }
@@ -414,9 +423,14 @@ struct NewChatSheet: View {
     @State private var workspace: Workspace = .personal
     @State private var persona: AssistantPersona = .default
     @State private var showingCreateAssistant = false
+    @State private var showingCreateWorkspace = false
+    @State private var workspaceName = ""
     @Environment(\.dismiss) var dismiss
+    let workspaces: [Workspace]
     let personas: [AssistantPersona]
     let isDark: Bool
+    let onCreateWorkspace: (String) -> Workspace
+    let onDeleteWorkspace: (Workspace) -> Void
     let onCreatePersona: (String, String, String) -> AssistantPersona
     let onCreate: (String, Workspace, AssistantPersona) -> Void
 
@@ -427,7 +441,7 @@ struct NewChatSheet: View {
                     TextField("What's this about?", text: $title)
                 }
                 Section("Workspace") {
-                    ForEach(Workspace.allCases) { ws in
+                    ForEach(workspaces) { ws in
                         Button(action: { workspace = ws }) {
                             HStack {
                                 Image(systemName: ws.icon).foregroundColor(ws.color)
@@ -438,6 +452,25 @@ struct NewChatSheet: View {
                                 }
                             }
                         }
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            if !ws.isBuiltIn {
+                                Button(role: .destructive) {
+                                    onDeleteWorkspace(ws)
+                                    if workspace == ws {
+                                        workspace = .personal
+                                    }
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                            }
+                        }
+                    }
+                    Button {
+                        workspaceName = ""
+                        showingCreateWorkspace = true
+                    } label: {
+                        Label("Add Workspace", systemImage: "plus.circle")
+                            .foregroundColor(AetherColors.oakMedium)
                     }
                 }
                 Section("Assistant") {
@@ -480,6 +513,15 @@ struct NewChatSheet: View {
                 persona = onCreatePersona(name, description, instructions)
                 showingCreateAssistant = false
             }
+        }
+        .alert("Add Workspace", isPresented: $showingCreateWorkspace) {
+            TextField("Workspace name", text: $workspaceName)
+            Button("Cancel", role: .cancel) {}
+            Button("Add") {
+                workspace = onCreateWorkspace(workspaceName)
+            }
+        } message: {
+            Text("Create a workspace for a new group of conversations.")
         }
     }
 }

@@ -39,39 +39,43 @@ extension Color {
     }
 }
 
-enum Workspace: String, CaseIterable, Identifiable, Sendable {
-    case personal = "Personal"
-    case work     = "Work"
-    case creative = "Creative"
-    case research = "Research"
+struct Workspace: Identifiable, Equatable, Hashable, Codable, Sendable {
+    let id: String
+    let name: String
+    let iconName: String
+    let colorHex: String
+    let isBuiltIn: Bool
 
-    var id: String { rawValue }
+    var rawValue: String { name }
 
     var icon: String {
-        switch self {
-        case .personal: return "person.fill"
-        case .work:     return "briefcase.fill"
-        case .creative: return "paintpalette.fill"
-        case .research: return "book.fill"
-        }
+        iconName
     }
 
     var color: Color {
-        switch self {
-        case .personal: return AetherColors.oakMedium
-        case .work:     return AetherColors.forestMedium
-        case .creative: return AetherColors.copper
-        case .research: return AetherColors.info
-        }
+        Color(hex: colorHex)
     }
 
     var paleColor: Color {
-        switch self {
-        case .personal: return AetherColors.oakPale
-        case .work:     return AetherColors.forestPale
-        case .creative: return AetherColors.oakCream
-        case .research: return Color(hex: "D0E0F0")
-        }
+        color.opacity(0.18)
+    }
+
+    static let personal = Workspace(id: "personal", name: "Personal", iconName: "person.fill", colorHex: "6B4423", isBuiltIn: true)
+    static let work = Workspace(id: "work", name: "Work", iconName: "briefcase.fill", colorHex: "4A7C4A", isBuiltIn: true)
+    static let creative = Workspace(id: "creative", name: "Creative", iconName: "paintpalette.fill", colorHex: "B87333", isBuiltIn: true)
+    static let research = Workspace(id: "research", name: "Research", iconName: "book.fill", colorHex: "4A7CB8", isBuiltIn: true)
+
+    static let builtIns: [Workspace] = [.personal, .work, .creative, .research]
+    static let allCases = builtIns
+
+    static func custom(name: String) -> Workspace {
+        Workspace(
+            id: "custom-\(UUID().uuidString)",
+            name: name,
+            iconName: "folder.fill",
+            colorHex: "A0784A",
+            isBuiltIn: false
+        )
     }
 }
 

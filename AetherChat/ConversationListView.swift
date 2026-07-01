@@ -44,7 +44,7 @@ struct ConversationListView: View {
                             WorkspaceChip(label: "All", isSelected: selectedWorkspace == nil, color: AetherColors.oakMedium) {
                                 selectedWorkspace = nil
                             }
-                            ForEach(Workspace.allCases) { ws in
+                            ForEach(state.availableWorkspaces) { ws in
                                 WorkspaceChip(label: ws.rawValue, isSelected: selectedWorkspace == ws, color: ws.color) {
                                     selectedWorkspace = ws
                                 }
@@ -128,8 +128,18 @@ struct ConversationListView: View {
         }
         .sheet(isPresented: $showNewChat) {
             NewChatSheet(
+                workspaces: state.availableWorkspaces,
                 personas: state.availablePersonas,
                 isDark: state.isDarkTheme,
+                onCreateWorkspace: { name in
+                    state.createWorkspace(name: name)
+                },
+                onDeleteWorkspace: { workspace in
+                    state.deleteWorkspace(workspace)
+                    if selectedWorkspace == workspace {
+                        selectedWorkspace = nil
+                    }
+                },
                 onCreatePersona: { name, description, instructions in
                     state.createCustomPersona(name: name, description: description, instructions: instructions)
                 },
