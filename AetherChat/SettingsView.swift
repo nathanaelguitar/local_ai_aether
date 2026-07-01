@@ -27,31 +27,15 @@ struct SettingsView: View {
                         SettingsSection(title: "Default Workspace") {
                             VStack(spacing: 0) {
                                 ForEach(state.availableWorkspaces) { ws in
-                                    Button(action: { state.defaultWorkspace = ws }) {
-                                        HStack {
-                                            Image(systemName: ws.icon)
-                                                .frame(width: 28)
-                                                .foregroundColor(ws.color)
-                                            Text(ws.rawValue)
-                                                .foregroundColor(.primary)
-                                            Spacer()
-                                            if state.defaultWorkspace == ws {
-                                                Image(systemName: "checkmark")
-                                                    .foregroundColor(ws.color)
-                                            }
-                                        }
-                                        .padding(.horizontal, 16)
-                                        .padding(.vertical, 12)
-                                    }
-                                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                        if !ws.isBuiltIn {
-                                            Button(role: .destructive) {
-                                                state.deleteWorkspace(ws)
-                                            } label: {
-                                                Label("Delete", systemImage: "trash")
-                                            }
-                                        }
-                                    }
+                                    WorkspacePickerRow(
+                                        workspace: ws,
+                                        isSelected: state.defaultWorkspace == ws,
+                                        showsDeleteButton: !ws.isBuiltIn,
+                                        onSelect: { state.defaultWorkspace = ws },
+                                        onDelete: { state.deleteWorkspace(ws) }
+                                    )
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 12)
                                     if ws != state.availableWorkspaces.last {
                                         Divider().padding(.leading, 56)
                                     }
@@ -285,6 +269,52 @@ struct SettingsInfoRow: View {
     }
 }
 
+struct WorkspacePickerRow: View {
+    let workspace: Workspace
+    let isSelected: Bool
+    let showsDeleteButton: Bool
+    let onSelect: () -> Void
+    let onDelete: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: workspace.icon)
+                .frame(width: 28)
+                .foregroundColor(workspace.color)
+
+            Text(workspace.rawValue)
+                .foregroundColor(.primary)
+
+            Spacer()
+
+            if isSelected {
+                Image(systemName: "checkmark")
+                    .foregroundColor(workspace.color)
+            }
+
+            if showsDeleteButton {
+                Button(role: .destructive, action: onDelete) {
+                    Image(systemName: "trash")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(AetherColors.error)
+                        .padding(.leading, 4)
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel("Delete \(workspace.rawValue)")
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onSelect)
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            if showsDeleteButton {
+                Button(role: .destructive, action: onDelete) {
+                    Label("Delete", systemImage: "trash")
+                }
+            }
+        }
+    }
+}
+
 struct ApiConfigSheet: View {
     @Binding var endpoint: String
     @Environment(\.dismiss) var dismiss
@@ -442,28 +472,18 @@ struct NewChatSheet: View {
                 }
                 Section("Workspace") {
                     ForEach(workspaces) { ws in
-                        Button(action: { workspace = ws }) {
-                            HStack {
-                                Image(systemName: ws.icon).foregroundColor(ws.color)
-                                Text(ws.rawValue).foregroundColor(.primary)
-                                Spacer()
+                        WorkspacePickerRow(
+                            workspace: ws,
+                            isSelected: workspace == ws,
+                            showsDeleteButton: !ws.isBuiltIn,
+                            onSelect: { workspace = ws },
+                            onDelete: {
+                                onDeleteWorkspace(ws)
                                 if workspace == ws {
-                                    Image(systemName: "checkmark").foregroundColor(ws.color)
+                                    workspace = .personal
                                 }
                             }
-                        }
-                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            if !ws.isBuiltIn {
-                                Button(role: .destructive) {
-                                    onDeleteWorkspace(ws)
-                                    if workspace == ws {
-                                        workspace = .personal
-                                    }
-                                } label: {
-                                    Label("Delete", systemImage: "trash")
-                                }
-                            }
-                        }
+                        )
                     }
                     Button {
                         workspaceName = ""
