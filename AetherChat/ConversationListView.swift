@@ -123,10 +123,17 @@ struct ConversationListView: View {
             }
         }
         .sheet(isPresented: $showNewChat) {
-            NewChatSheet(onCreate: { title, ws, persona in
-                selectedConversationId = state.createConversation(title: title, workspace: ws, persona: persona)
-                showNewChat = false
-            })
+            NewChatSheet(
+                personas: state.availablePersonas,
+                isDark: state.isDarkTheme,
+                onCreatePersona: { name, description, instructions in
+                    state.createCustomPersona(name: name, description: description, instructions: instructions)
+                },
+                onCreate: { title, ws, persona in
+                    selectedConversationId = state.createConversation(title: title, workspace: ws, persona: persona)
+                    showNewChat = false
+                }
+            )
         }
         .sheet(isPresented: $showSettings) {
             SettingsView()

@@ -134,15 +134,19 @@ class AppState: ObservableObject {
     @Published var messageFontScale: Double = UserDefaults.standard.double(forKey: "messageFontScale") == 0 ? 1.0 : UserDefaults.standard.double(forKey: "messageFontScale") {
         didSet { UserDefaults.standard.set(messageFontScale, forKey: "messageFontScale") }
     }
-    @Published var customAssistantName: String = UserDefaults.standard.string(forKey: "customAssistantName") ?? "" {
-        didSet { UserDefaults.standard.set(customAssistantName, forKey: "customAssistantName") }
-    }
     @Published var customSystemPrompt: String = UserDefaults.standard.string(forKey: "customSystemPrompt") ?? "" {
         didSet { UserDefaults.standard.set(customSystemPrompt, forKey: "customSystemPrompt") }
+    }
+    @Published var customPersonas: [AssistantPersona] = AppState.loadCustomPersonas() {
+        didSet { AppState.saveCustomPersonas(customPersonas) }
     }
     private let backend = AetherBackendClient()
     private let onDevice = AetherOnDeviceClient()
     private let webSearch = AetherWebSearchService()
+
+    var availablePersonas: [AssistantPersona] {
+        AssistantPersona.all + customPersonas
+    }
 
     func togglePin(_ id: UUID) {
         guard let idx = conversations.firstIndex(where: { $0.id == id }) else { return }
@@ -158,6 +162,19 @@ class AppState: ObservableObject {
         let conversation = Conversation(title: trimmed.isEmpty ? "Untitled" : trimmed, workspace: workspace, persona: persona)
         conversations.insert(conversation, at: 0)
         return conversation.id
+    }
+
+    func createCustomPersona(name: String, description: String, instructions: String) -> AssistantPersona {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedDescription = description.trimmingCharacters(in: .whitespacesAndNewlines)
+        let persona = AssistantPersona(
+            id: "custom-\(UUID().uuidString)",
+            name: trimmedName.isEmpty ? "Custom Assistant" : trimmedName,
+            description: trimmedDescription.isEmpty ? "Custom assistant" : trimmedDescription,
+            instructions: instructions.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+        customPersonas.append(persona)
+        return persona
     }
 
     func renameConversation(_ id: UUID, title: String) {
@@ -207,7 +224,6 @@ class AppState: ObservableObject {
                 persona: persona,
                 messages: messageSnapshot,
                 webSearchContext: webSearchContext,
-                customAssistantName: customAssistantName,
                 customSystemPrompt: customSystemPrompt
             )
             modelLoadingMessage = nil
@@ -232,7 +248,6 @@ class AppState: ObservableObject {
         persona: AssistantPersona,
         messages: [ChatMessage],
         webSearchContext: String? = nil,
-        customAssistantName: String = "",
         customSystemPrompt: String = ""
     ) async throws -> String {
         if selectedModel == AetherModelCatalog.aetherV1DisplayName {
@@ -240,7 +255,6 @@ class AppState: ObservableObject {
                 persona: persona,
                 messages: messages,
                 webSearchContext: webSearchContext,
-                customAssistantName: customAssistantName,
                 customSystemPrompt: customSystemPrompt,
                 status: { [weak self] message in
                     await MainActor.run {
@@ -265,9 +279,18 @@ class AppState: ObservableObject {
             persona: persona,
             messages: messages,
             webSearchContext: webSearchContext,
-            customAssistantName: customAssistantName,
             customSystemPrompt: customSystemPrompt
         )
+    }
+
+    private static func loadCustomPersonas() -> [AssistantPersona] {
+        guard let data = UserDefaults.standard.data(forKey: "customPersonas") else { return [] }
+        return (try? JSONDecoder().decode([AssistantPersona].self, from: data)) ?? []
+    }
+
+    private static func saveCustomPersonas(_ personas: [AssistantPersona]) {
+        guard let data = try? JSONEncoder().encode(personas) else { return }
+        UserDefaults.standard.set(data, forKey: "customPersonas")
     }
 
     private func appendAssistantMessage(to id: UUID, content: String) {

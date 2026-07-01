@@ -15,7 +15,6 @@ struct AetherBackendClient: Sendable {
         persona: AssistantPersona,
         messages: [ChatMessage],
         webSearchContext: String? = nil,
-        customAssistantName: String = "",
         customSystemPrompt: String = ""
     ) async throws -> String {
         var request = URLRequest(url: try chatURL(from: endpoint))
@@ -29,7 +28,6 @@ struct AetherBackendClient: Sendable {
                     persona: persona,
                     messages: messages,
                     webSearchContext: webSearchContext,
-                    customAssistantName: customAssistantName,
                     customSystemPrompt: customSystemPrompt
                 ),
                 temperature: 0.8,
@@ -79,16 +77,16 @@ struct AetherBackendClient: Sendable {
         persona: AssistantPersona,
         messages: [ChatMessage],
         webSearchContext: String? = nil,
-        customAssistantName: String = "",
         customSystemPrompt: String = ""
     ) -> [OpenAIRequestMessage] {
-        let assistantName = customAssistantName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ? persona.name
-            : customAssistantName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let personaInstructions = persona.instructions.trimmingCharacters(in: .whitespacesAndNewlines)
         let customInstructions = customSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        var systemText = "You are \(assistantName), \(persona.description). Current date: \(Self.currentDateString()). Reply in a grounded, helpful tone."
+        var systemText = "You are \(persona.name), \(persona.description). Current date: \(Self.currentDateString()). Reply in a grounded, helpful tone."
+        if !personaInstructions.isEmpty {
+            systemText += "\nAssistant-specific instructions:\n\(personaInstructions)"
+        }
         if !customInstructions.isEmpty {
-            systemText += "\nUser-defined assistant instructions:\n\(customInstructions)\nFollow these instructions for style, role, and behavior unless they conflict with grounding rules or user safety."
+            systemText += "\nUser preferences:\n\(customInstructions)\nFollow these preferences for style and behavior unless they conflict with assistant-specific instructions, grounding rules, or user safety."
         }
         let system = OpenAIRequestMessage(
             role: "system",

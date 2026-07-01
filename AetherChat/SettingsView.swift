@@ -3,7 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @EnvironmentObject var state: AppState
     @Environment(\.dismiss) var dismiss
-    @State private var showingAssistantSheet = false
+    @State private var showingSystemPreferences = false
 
     var body: some View {
         NavigationStack {
@@ -61,10 +61,10 @@ struct SettingsView: View {
                                 Divider().padding(.leading, 56)
                                 SettingsNavRow(
                                     icon: "person.crop.circle.badge.gearshape",
-                                    title: "Custom Assistant",
-                                    subtitle: state.customSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Default Aether behavior" : "Custom prompt enabled"
+                                    title: "System Preferences",
+                                    subtitle: state.customSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Default response behavior" : "Global preferences enabled"
                                 ) {
-                                    showingAssistantSheet = true
+                                    showingSystemPreferences = true
                                 }
                             }
                             .background(Color(UIColor.secondarySystemBackground))
@@ -111,9 +111,8 @@ struct SettingsView: View {
             }
         }
         .preferredColorScheme(state.isDarkTheme ? .dark : .light)
-        .sheet(isPresented: $showingAssistantSheet) {
-            CustomAssistantSheet(
-                name: $state.customAssistantName,
+        .sheet(isPresented: $showingSystemPreferences) {
+            SystemPreferencesSheet(
                 prompt: $state.customSystemPrompt,
                 isDark: state.isDarkTheme
             )
@@ -351,12 +350,10 @@ struct ModelConfigSheet: View {
     }
 }
 
-struct CustomAssistantSheet: View {
-    @Binding var name: String
+struct SystemPreferencesSheet: View {
     @Binding var prompt: String
     let isDark: Bool
     @Environment(\.dismiss) var dismiss
-    @State private var draftName = ""
     @State private var draftPrompt = ""
 
     var body: some View {
@@ -364,20 +361,7 @@ struct CustomAssistantSheet: View {
             OakBackground {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
-                        SettingsSection(title: "Identity") {
-                            VStack(alignment: .leading, spacing: 8) {
-                                TextField("Assistant name, e.g. Grove", text: $draftName)
-                                    .textInputAutocapitalization(.words)
-                                    .padding(12)
-                                    .background(Color(UIColor.secondarySystemBackground))
-                                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                                Text("Leave blank to keep using each conversation's selected assistant name.")
-                                    .font(.system(size: 12))
-                                    .foregroundColor(AetherColors.warmGray500)
-                            }
-                        }
-
-                        SettingsSection(title: "System Prompt") {
+                        SettingsSection(title: "Global Preferences") {
                             VStack(alignment: .leading, spacing: 8) {
                                 TextEditor(text: $draftPrompt)
                                     .frame(minHeight: 180)
@@ -385,17 +369,16 @@ struct CustomAssistantSheet: View {
                                     .scrollContentBackground(.hidden)
                                     .background(Color(UIColor.secondarySystemBackground))
                                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                                Text("Use this for persistent style and behavior, such as tone, formatting preferences, or a specialized role. Web grounding and safety rules still take priority.")
+                                Text("Use this for persistent response preferences, such as tone, formatting, verbosity, or how you like answers structured. Per-chat assistant instructions, web grounding, and safety rules still take priority.")
                                     .font(.system(size: 12))
                                     .foregroundColor(AetherColors.warmGray500)
                             }
                         }
 
                         Button(role: .destructive) {
-                            draftName = ""
                             draftPrompt = ""
                         } label: {
-                            Label("Clear Custom Assistant", systemImage: "trash")
+                            Label("Clear Preferences", systemImage: "trash")
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.bordered)
@@ -404,7 +387,7 @@ struct CustomAssistantSheet: View {
                     .padding(16)
                 }
             }
-            .navigationTitle("Custom Assistant")
+            .navigationTitle("System Preferences")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -412,7 +395,6 @@ struct CustomAssistantSheet: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Save") {
-                        name = draftName.trimmingCharacters(in: .whitespacesAndNewlines)
                         prompt = draftPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
                         dismiss()
                     }
@@ -422,7 +404,6 @@ struct CustomAssistantSheet: View {
         }
         .preferredColorScheme(isDark ? .dark : .light)
         .onAppear {
-            draftName = name
             draftPrompt = prompt
         }
     }
@@ -432,7 +413,11 @@ struct NewChatSheet: View {
     @State private var title = ""
     @State private var workspace: Workspace = .personal
     @State private var persona: AssistantPersona = .default
+    @State private var showingCreateAssistant = false
     @Environment(\.dismiss) var dismiss
+    let personas: [AssistantPersona]
+    let isDark: Bool
+    let onCreatePersona: (String, String, String) -> AssistantPersona
     let onCreate: (String, Workspace, AssistantPersona) -> Void
 
     var body: some View {
@@ -456,7 +441,7 @@ struct NewChatSheet: View {
                     }
                 }
                 Section("Assistant") {
-                    ForEach(AssistantPersona.all) { p in
+                    ForEach(personas) { p in
                         Button(action: { persona = p }) {
                             HStack {
                                 VStack(alignment: .leading) {
@@ -469,6 +454,12 @@ struct NewChatSheet: View {
                                 }
                             }
                         }
+                    }
+                    Button {
+                        showingCreateAssistant = true
+                    } label: {
+                        Label("Create Assistant", systemImage: "plus.circle")
+                            .foregroundColor(AetherColors.oakMedium)
                     }
                 }
             }
@@ -484,5 +475,78 @@ struct NewChatSheet: View {
                 }
             }
         }
+        .sheet(isPresented: $showingCreateAssistant) {
+            CreateAssistantSheet(isDark: isDark) { name, description, instructions in
+                persona = onCreatePersona(name, description, instructions)
+                showingCreateAssistant = false
+            }
+        }
+    }
+}
+
+struct CreateAssistantSheet: View {
+    let isDark: Bool
+    let onSave: (String, String, String) -> Void
+    @Environment(\.dismiss) var dismiss
+    @State private var name = ""
+    @State private var description = ""
+    @State private var instructions = ""
+
+    var body: some View {
+        NavigationStack {
+            OakBackground {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 18) {
+                        SettingsSection(title: "Assistant") {
+                            VStack(alignment: .leading, spacing: 10) {
+                                TextField("Name, e.g. Architect", text: $name)
+                                    .textInputAutocapitalization(.words)
+                                    .padding(12)
+                                    .background(Color(UIColor.secondarySystemBackground))
+                                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                                TextField("Short description", text: $description)
+                                    .textInputAutocapitalization(.sentences)
+                                    .padding(12)
+                                    .background(Color(UIColor.secondarySystemBackground))
+                                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            }
+                        }
+
+                        SettingsSection(title: "Instructions") {
+                            VStack(alignment: .leading, spacing: 8) {
+                                TextEditor(text: $instructions)
+                                    .frame(minHeight: 180)
+                                    .padding(8)
+                                    .scrollContentBackground(.hidden)
+                                    .background(Color(UIColor.secondarySystemBackground))
+                                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                                Text("These instructions apply only when this assistant is selected for a conversation.")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(AetherColors.warmGray500)
+                            }
+                        }
+                    }
+                    .padding(16)
+                }
+            }
+            .navigationTitle("Create Assistant")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Save") {
+                        onSave(name, description, instructions)
+                        dismiss()
+                    }
+                    .foregroundColor(AetherColors.oakMedium)
+                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+        }
+        .preferredColorScheme(isDark ? .dark : .light)
     }
 }

@@ -75,10 +75,18 @@ enum Workspace: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-struct AssistantPersona: Identifiable, Equatable, Sendable {
+struct AssistantPersona: Identifiable, Equatable, Codable, Sendable {
     let id: String
     let name: String
     let description: String
+    let instructions: String
+
+    init(id: String, name: String, description: String, instructions: String = "") {
+        self.id = id
+        self.name = name
+        self.description = description
+        self.instructions = instructions
+    }
 
     static let `default`    = AssistantPersona(id: "default",    name: "Aether",     description: "Balanced, thoughtful assistant")
     static let analytical   = AssistantPersona(id: "analytical", name: "Sage",       description: "Deep analytical reasoning")
