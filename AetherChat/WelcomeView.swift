@@ -36,7 +36,7 @@ struct WelcomeView: View {
                             .opacity(visible ? 1 : 0)
                             .animation(.easeOut(duration: 0.6).delay(0.35), value: visible)
 
-                        Text("Conversations that grow with you.\nOrganized by workspace, powered by choice.")
+                        Text("Private conversations that stay close.\nOn-device intelligence, built to tread lightly.")
                             .font(.system(size: 15))
                             .foregroundColor(AetherColors.warmGray600)
                             .multilineTextAlignment(.center)
@@ -50,12 +50,12 @@ struct WelcomeView: View {
 
                     // Features
                     VStack(spacing: 20) {
-                        FeatureRow(icon: "🌳", title: "Workspace Organization",
+                        FeatureRow(icon: "🔒", title: "Privacy First",
+                                   subtitle: "Aether V1 runs locally on your iPhone by default")
+                        FeatureRow(icon: "🌿", title: "Lower-Impact AI",
+                                   subtitle: "Use the model already in your hand instead of a data center for every reply")
+                        FeatureRow(icon: "🌳", title: "Organized by Workspace",
                                    subtitle: "Separate Personal, Work, Creative, and Research conversations")
-                        FeatureRow(icon: "✨", title: "Persona Selection",
-                                   subtitle: "Choose the right assistant for every task")
-                        FeatureRow(icon: "🔖", title: "Saved Prompts",
-                                   subtitle: "Build reusable workflows that save time")
                     }
                     .padding(.horizontal, 32)
                     .opacity(visible ? 1 : 0)
@@ -87,6 +87,7 @@ struct WelcomeView: View {
 }
 
 struct FeatureRow: View {
+    @Environment(\.colorScheme) private var colorScheme
     let icon: String
     let title: String
     let subtitle: String
@@ -97,10 +98,10 @@ struct FeatureRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(AetherColors.oakDark)
+                    .foregroundColor(colorScheme == .dark ? AetherColors.oakPale : AetherColors.oakDark)
                 Text(subtitle)
                     .font(.system(size: 13))
-                    .foregroundColor(AetherColors.warmGray600)
+                    .foregroundColor(colorScheme == .dark ? AetherColors.warmGray400 : AetherColors.warmGray600)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
