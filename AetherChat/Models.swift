@@ -137,15 +137,6 @@ class AppState: ObservableObject {
     @Published var customSystemPrompt: String = UserDefaults.standard.string(forKey: "customSystemPrompt") ?? "" {
         didSet { UserDefaults.standard.set(customSystemPrompt, forKey: "customSystemPrompt") }
     }
-    @Published var userNickname: String = UserDefaults.standard.string(forKey: "userNickname") ?? "" {
-        didSet { UserDefaults.standard.set(userNickname, forKey: "userNickname") }
-    }
-    @Published var preferredAssistantName: String = UserDefaults.standard.string(forKey: "preferredAssistantName") ?? "" {
-        didSet { UserDefaults.standard.set(preferredAssistantName, forKey: "preferredAssistantName") }
-    }
-    @Published var hasCompletedOnboarding: Bool = UserDefaults.standard.bool(forKey: "hasCompletedOnboarding") {
-        didSet { UserDefaults.standard.set(hasCompletedOnboarding, forKey: "hasCompletedOnboarding") }
-    }
     @Published var customPersonas: [AssistantPersona] = AppState.loadCustomPersonas() {
         didSet { AppState.saveCustomPersonas(customPersonas) }
     }
@@ -158,14 +149,7 @@ class AppState: ObservableObject {
     }
 
     var defaultPersona: AssistantPersona {
-        let trimmed = preferredAssistantName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return .default }
-        return AssistantPersona(
-            id: AssistantPersona.default.id,
-            name: trimmed,
-            description: AssistantPersona.default.description,
-            instructions: AssistantPersona.default.instructions
-        )
+        .default
     }
 
     func togglePin(_ id: UUID) {
@@ -201,20 +185,6 @@ class AppState: ObservableObject {
         guard let idx = conversations.firstIndex(where: { $0.id == id }) else { return }
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         conversations[idx].title = trimmed.isEmpty ? "Untitled" : trimmed
-    }
-
-    func completeOnboarding(userName: String, assistantName: String) {
-        userNickname = userName.trimmingCharacters(in: .whitespacesAndNewlines)
-        preferredAssistantName = assistantName.trimmingCharacters(in: .whitespacesAndNewlines)
-        hasCompletedOnboarding = true
-    }
-
-    func preloadAetherV1(status: @escaping @Sendable (String?) async -> Void) async {
-        do {
-            try await onDevice.preload(status: status)
-        } catch {
-            await status(nil)
-        }
     }
 
     func sendMessage(in id: UUID, text: String, attachments: [ChatAttachment] = []) async {
@@ -350,14 +320,6 @@ class AppState: ObservableObject {
 
     private var runtimeSystemPrompt: String {
         var parts = [String]()
-        let userName = userNickname.trimmingCharacters(in: .whitespacesAndNewlines)
-        let assistantName = preferredAssistantName.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !userName.isEmpty {
-            parts.append("The user's preferred name is \(userName). Use it naturally when helpful, but do not overuse it.")
-        }
-        if !assistantName.isEmpty {
-            parts.append("The user wants to call you \(assistantName). Use \(assistantName) as your assistant name when referring to yourself.")
-        }
         let preferences = customSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         if !preferences.isEmpty {
             parts.append(preferences)

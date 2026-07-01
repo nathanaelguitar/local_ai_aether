@@ -15,7 +15,6 @@
 		789F1FF0BD31428A8B29336B /* AetherBackendClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 206E2F83A641F2A88EE4DA46 /* AetherBackendClient.swift */; };
 		80644A3A9DF1AB3BD57AC6DD /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9B65CA3006F022BA596EAD5 /* SettingsView.swift */; };
 		A0643D6E50DAB16D431C0350 /* AetherOnDeviceClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B74413AB0BA1012F10A00D97 /* AetherOnDeviceClient.swift */; };
-		A3C5BF0084236D474EF572AA /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9ED4C28E6DE5DAB50E739CBA /* OnboardingView.swift */; };
 		A9253ECB0B2AEC60F134903A /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13F5FF0AD4ED4CEF36E66D60 /* Theme.swift */; };
 		B0CAA0CCADC02CFB94962E66 /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D5974F2A6845866B4D19213 /* ChatView.swift */; };
 		BD19FEDCFEC33192A151A809 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F7C8667FF0B2BD51ECB8A79 /* ContentView.swift */; };
@@ -32,7 +31,6 @@
 		7072D9240F6DED5D1510BDD3 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		998CAB07B8AB6F632D0F9289 /* AetherWebSearchService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AetherWebSearchService.swift; sourceTree = "<group>"; };
 		9D5974F2A6845866B4D19213 /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
-		9ED4C28E6DE5DAB50E739CBA /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		A75CC71D6D8AE5048E923411 /* AetherChatApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AetherChatApp.swift; sourceTree = "<group>"; };
 		AA3332E3AE730AB8A109BB39 /* WelcomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WelcomeView.swift; sourceTree = "<group>"; };
 		B53395A9747A04EF161105F9 /* AetherChat.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = AetherChat.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -77,7 +75,6 @@
 				7072D9240F6DED5D1510BDD3 /* Info.plist */,
 				C8141DD10A44BEB1A061A453 /* Models.swift */,
 				D26E0F534E655ABC495FDF36 /* OakBackground.swift */,
-				9ED4C28E6DE5DAB50E739CBA /* OnboardingView.swift */,
 				E9B65CA3006F022BA596EAD5 /* SettingsView.swift */,
 				13F5FF0AD4ED4CEF36E66D60 /* Theme.swift */,
 				AA3332E3AE730AB8A109BB39 /* WelcomeView.swift */,
@@ -167,7 +164,6 @@
 				110F557D3CFEFA179247DEAF /* ConversationListView.swift in Sources */,
 				4901DD09E5275CA4A1BCA716 /* Models.swift in Sources */,
 				03C3B8E6586983CBE3FA18DA /* OakBackground.swift in Sources */,
-				A3C5BF0084236D474EF572AA /* OnboardingView.swift in Sources */,
 				80644A3A9DF1AB3BD57AC6DD /* SettingsView.swift in Sources */,
 				A9253ECB0B2AEC60F134903A /* Theme.swift in Sources */,
 				DEA563445D69FD229384551E /* WelcomeView.swift in Sources */,

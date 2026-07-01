@@ -7,20 +7,7 @@ struct ContentView: View {
 
     var body: some View {
         Group {
-            if !state.hasCompletedOnboarding {
-                OnboardingView(
-                    onPreload: { status in
-                        await state.preloadAetherV1(status: status)
-                    },
-                    onComplete: { userName, assistantName in
-                        state.completeOnboarding(userName: userName, assistantName: assistantName)
-                        withAnimation(.easeInOut(duration: 0.4)) {
-                            showConversations = true
-                        }
-                    }
-                )
-                .transition(.opacity)
-            } else if showConversations {
+            if showConversations {
                 ConversationListView()
                     .environmentObject(state)
                     .transition(.asymmetric(
