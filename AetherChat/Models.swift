@@ -255,12 +255,24 @@ class AppState: ObservableObject {
                 }
             }
             generationStatusMessage = "Composing a response"
-            let response = try await generateReply(
+            var response = try await generateReply(
                 persona: persona,
                 messages: messageSnapshot,
                 webSearchContext: webSearchContext,
                 customSystemPrompt: runtimeSystemPrompt
             )
+            if isRepeatedAssistantResponse(response, in: messageSnapshot) {
+                generationStatusMessage = "Redirecting repeated response"
+                response = try await generateReply(
+                    persona: persona,
+                    messages: messageSnapshot,
+                    webSearchContext: webSearchContext,
+                    customSystemPrompt: redirectedSystemPrompt(afterRepeatedResponse: response, latestUserText: latestUserText)
+                )
+                if isRepeatedAssistantResponse(response, in: messageSnapshot) {
+                    response = fallbackRedirectResponse(latestUserText: latestUserText)
+                }
+            }
             modelLoadingMessage = nil
             generationStatusMessage = nil
             appendAssistantMessage(to: id, content: response)
@@ -325,6 +337,64 @@ class AppState: ObservableObject {
             parts.append(preferences)
         }
         return parts.joined(separator: "\n")
+    }
+
+    private func redirectedSystemPrompt(afterRepeatedResponse response: String, latestUserText: String) -> String {
+        var parts = [String]()
+        let basePrompt = runtimeSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !basePrompt.isEmpty {
+            parts.append(basePrompt)
+        }
+        parts.append("""
+        Loop prevention: your previous draft repeated an earlier assistant reply instead of answering the latest user message.
+        Do not repeat, summarize, or ask again for details already provided.
+        Answer this latest user message directly: "\(latestUserText.trimmingCharacters(in: .whitespacesAndNewlines))"
+        If the user asks for a poem, story, rhyme, rewrite, or other creative output, produce the requested output now.
+        Avoid starting with the same wording as this rejected draft:
+        \(String(response.prefix(600)))
+        """)
+        return parts.joined(separator: "\n\n")
+    }
+
+    private func isRepeatedAssistantResponse(_ response: String, in messages: [ChatMessage]) -> Bool {
+        let candidate = normalizedForLoopDetection(response)
+        guard candidate.count > 80 else { return false }
+        return messages
+            .reversed()
+            .filter { $0.role == .assistant }
+            .prefix(4)
+            .contains { previous in
+                let normalizedPrevious = normalizedForLoopDetection(previous.content)
+                guard normalizedPrevious.count > 80 else { return false }
+                return candidate == normalizedPrevious || similarity(candidate, normalizedPrevious) >= 0.92
+            }
+    }
+
+    private func normalizedForLoopDetection(_ text: String) -> String {
+        text
+            .lowercased()
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .replacingOccurrences(of: #"[^a-z0-9 ]"#, with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func similarity(_ lhs: String, _ rhs: String) -> Double {
+        let lhsWords = Set(lhs.split(separator: " ").map(String.init))
+        let rhsWords = Set(rhs.split(separator: " ").map(String.init))
+        guard !lhsWords.isEmpty, !rhsWords.isEmpty else { return 0 }
+        let intersection = lhsWords.intersection(rhsWords).count
+        let union = lhsWords.union(rhsWords).count
+        return Double(intersection) / Double(union)
+    }
+
+    private func fallbackRedirectResponse(latestUserText: String) -> String {
+        let trimmed = latestUserText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return """
+        I got stuck repeating a previous answer, so I stopped that loop.
+
+        Please resend or rephrase this request and I will answer it fresh:
+        \(trimmed.isEmpty ? "your last message" : trimmed)
+        """
     }
 
     private static func loadCustomPersonas() -> [AssistantPersona] {
