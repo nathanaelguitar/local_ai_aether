@@ -47,7 +47,7 @@ struct ChatView: View {
                                         message: msg,
                                         isDark: state.isDarkTheme,
                                         fontScale: state.messageFontScale,
-                                        canRegenerate: msg.id == latestAssistantMessageId && !isSending,
+                                        canRegenerate: false,
                                         onRegenerate: { regenerate() }
                                     )
                                         .id(msg.id)
@@ -364,30 +364,6 @@ struct MessageBubble: View {
                             sharePayload = SharePayload(messageText: message.content)
                         } label: {
                             Image(systemName: "square.and.arrow.up")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundColor(AetherColors.oakMedium)
-                                .frame(width: 28, height: 28)
-                                .background((isDark ? AetherColors.warmGray800 : Color.white).opacity(0.82))
-                                .clipShape(Circle())
-                        }
-                        .buttonStyle(.plain)
-
-                        Button {
-                            switch speechState {
-                            case .stopped:
-                                speech.speak(message.content) {
-                                    speechState = .stopped
-                                }
-                                speechState = .playing
-                            case .playing:
-                                speech.pause()
-                                speechState = .paused
-                            case .paused:
-                                speech.resume()
-                                speechState = .playing
-                            }
-                        } label: {
-                            Image(systemName: speechState.iconName)
                                 .font(.system(size: 12, weight: .semibold))
                                 .foregroundColor(AetherColors.oakMedium)
                                 .frame(width: 28, height: 28)

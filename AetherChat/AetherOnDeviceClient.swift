@@ -11,6 +11,17 @@ actor AetherOnDeviceClient {
 
     typealias StatusHandler = @Sendable (String?) async -> Void
 
+    func preload(status: StatusHandler? = nil) async throws {
+        #if canImport(LlamaSwift)
+        let modelFiles = try await AetherModelStore.localAetherV1Files(status: status)
+        await status?("Loading Aether V1 into memory")
+        _ = try loadEngine(modelURL: modelFiles.modelURL, mmprojURL: modelFiles.mmprojURL)
+        await status?(nil)
+        #else
+        throw AetherOnDeviceError.llamaUnavailable
+        #endif
+    }
+
     func send(
         persona: AssistantPersona,
         messages: [ChatMessage],

@@ -112,10 +112,14 @@ struct ConversationListView: View {
                     conversationId: id,
                     onNewChat: {
                         let conversation = state.conversations.first(where: { $0.id == id })
+                        let inheritedPersona = conversation?.persona
+                        let persona = inheritedPersona?.id == AssistantPersona.default.id
+                            ? state.defaultPersona
+                            : (inheritedPersona ?? state.defaultPersona)
                         let newId = state.createConversation(
                             title: "",
                             workspace: conversation?.workspace ?? state.defaultWorkspace,
-                            persona: conversation?.persona ?? .default
+                            persona: persona
                         )
                         selectedConversationId = newId
                     }
