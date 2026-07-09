@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Cleartext is enabled so the Backend provider can reach local/LAN OpenAI-compatible
+         servers (e.g. the Ktor proxy in ../backend) over plain HTTP during development.
+         Before a Play Store release, replace with a networkSecurityConfig that scopes
+         cleartext to private-network hosts only. -->
+    <application
+        android:label="CanopyChat"
+        android:usesCleartextTraffic="true"
+        android:icon="@mipmap/ic_launcher"
+        android:theme="@android:style/Theme.Material.Light.NoActionBar"
+        android:supportsRtl="true">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:configChanges="orientation|screenSize|keyboardHidden">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
