@@ -65,13 +65,13 @@
 		7072D9240F6DED5D1510BDD3 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		7CD95ED95BB4ABAFDF6D5FA5 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		92C0E75FA6A05969E3879A85 /* PaywallView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaywallView.swift; sourceTree = "<group>"; };
-		9403F2AC7BA0B0F471AE5FB3 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		9403F2AC7BA0B0F471AE5FB3 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		998CAB07B8AB6F632D0F9289 /* AetherWebSearchService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AetherWebSearchService.swift; sourceTree = "<group>"; };
 		9D5974F2A6845866B4D19213 /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
 		A75CC71D6D8AE5048E923411 /* AetherChatApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AetherChatApp.swift; sourceTree = "<group>"; };
 		AA3332E3AE730AB8A109BB39 /* WelcomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WelcomeView.swift; sourceTree = "<group>"; };
 		B1A040BA03975C0FEAB2A8C9 /* AetherLocationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AetherLocationService.swift; sourceTree = "<group>"; };
-		B53395A9747A04EF161105F9 /* AetherChat.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = AetherChat.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B53395A9747A04EF161105F9 /* AetherChat.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AetherChat.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B74413AB0BA1012F10A00D97 /* AetherOnDeviceClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AetherOnDeviceClient.swift; sourceTree = "<group>"; };
 		C8141DD10A44BEB1A061A453 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		D26E0F534E655ABC495FDF36 /* OakBackground.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OakBackground.swift; sourceTree = "<group>"; };
@@ -414,6 +414,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = YPHP5T7N84;
 				INFOPLIST_FILE = AetherChat/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -426,6 +427,9 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.nathanaelguitar.aetherchat;
 				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
 				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Release;
@@ -436,6 +440,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = YPHP5T7N84;
 				INFOPLIST_FILE = AetherChat/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -448,6 +453,9 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.nathanaelguitar.aetherchat;
 				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
 				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Debug;

@@ -4,6 +4,7 @@ import StoreKit
 @MainActor
 final class CanopySubscriptionManager: ObservableObject {
     static let monthlyProductID = "com.nathanaelguitar.canopychat.monthly"
+    static let yearlyProductID = "com.nathanaelguitar.canopychat.yearly"
     static let testAccessCode = "CANOPY-TEST"
     private static let testAccessKey = "canopy.testAccessUnlocked"
 
@@ -21,6 +22,10 @@ final class CanopySubscriptionManager: ObservableObject {
 
     var monthlyProduct: Product? {
         products.first { $0.id == Self.monthlyProductID }
+    }
+
+    var yearlyProduct: Product? {
+        products.first { $0.id == Self.yearlyProductID }
     }
 
     var monthlyProductIsAvailable: Bool {
@@ -69,7 +74,7 @@ final class CanopySubscriptionManager: ObservableObject {
         defer { isLoading = false }
 
         do {
-            products = try await Product.products(for: [Self.monthlyProductID])
+            products = try await Product.products(for: [Self.monthlyProductID, Self.yearlyProductID])
             await updateSubscriptionStatus()
             errorMessage = nil
         } catch {
@@ -80,6 +85,36 @@ final class CanopySubscriptionManager: ObservableObject {
     func purchaseMonthly() async {
         guard let product = monthlyProduct else {
             errorMessage = "Monthly subscription is temporarily unavailable. Please try again later."
+            return
+        }
+
+        isLoading = true
+        defer { isLoading = false }
+
+        do {
+            let result = try await product.purchase()
+            switch result {
+            case .success(.verified(let transaction)):
+                await transaction.finish()
+                await updateSubscriptionStatus()
+                errorMessage = nil
+            case .success(.unverified):
+                errorMessage = "Purchase could not be verified."
+            case .pending:
+                errorMessage = "Purchase is pending approval."
+            case .userCancelled:
+                break
+            @unknown default:
+                errorMessage = "Purchase could not be completed."
+            }
+        } catch {
+            errorMessage = "Purchase failed: \(error.localizedDescription)"
+        }
+    }
+
+    func purchaseYearly() async {
+        guard let product = yearlyProduct else {
+            errorMessage = "Yearly subscription is temporarily unavailable. Please try again later."
             return
         }
 
@@ -161,7 +196,7 @@ final class CanopySubscriptionManager: ObservableObject {
         var active = false
         for await result in Transaction.currentEntitlements {
             guard case .verified(let transaction) = result else { continue }
-            guard transaction.productID == Self.monthlyProductID else { continue }
+            guard transaction.productID == Self.monthlyProductID || transaction.productID == Self.yearlyProductID else { continue }
             guard transaction.revocationDate == nil else { continue }
             if let expirationDate = transaction.expirationDate, expirationDate <= Date() {
                 continue

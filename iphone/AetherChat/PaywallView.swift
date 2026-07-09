@@ -44,8 +44,9 @@ struct PaywallView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
 
                     VStack(spacing: 12) {
+                        // Yearly option
                         Button {
-                            handlePrimaryAction()
+                            Task { await subscription.purchaseYearly() }
                         } label: {
                             HStack {
                                 Spacer()
@@ -53,15 +54,40 @@ struct PaywallView: View {
                                     ProgressView()
                                         .tint(.white)
                                 } else {
-                                    Text(primaryButtonTitle)
-                                        .font(.system(size: 17, weight: .semibold))
+                                    VStack(spacing: 2) {
+                                        Text(yearlyButtonTitle)
+                                            .font(.system(size: 17, weight: .semibold))
+                                        Text("Save 25%")
+                                            .font(.system(size: 12, weight: .medium))
+                                            .opacity(0.8)
+                                    }
                                 }
                                 Spacer()
                             }
                             .foregroundColor(.white)
-                            .frame(height: 56)
+                            .frame(height: 64)
                             .background(AetherColors.oakMedium)
                             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        }
+                        .disabled(subscription.isLoading)
+
+                        // Monthly option
+                        Button {
+                            Task { await subscription.purchaseMonthly() }
+                        } label: {
+                            HStack {
+                                Spacer()
+                                Text(monthlyButtonTitle)
+                                    .font(.system(size: 16, weight: .semibold))
+                                Spacer()
+                            }
+                            .foregroundColor(AetherColors.oakMedium)
+                            .frame(height: 52)
+                            .background(Color.clear)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                    .stroke(AetherColors.oakMedium, lineWidth: 1.5)
+                            )
                         }
                         .disabled(subscription.isLoading)
 
@@ -169,19 +195,23 @@ struct PaywallView: View {
     }
 
     private var subscriptionDetailText: String {
-        let price = subscription.monthlyProduct?.displayPrice ?? "$4.99"
-        return "CanopyChat Plus is a monthly auto-renewable subscription (\(price)/month). It renews automatically unless cancelled at least 24 hours before the end of the current period. Manage or cancel anytime from your Apple ID subscriptions."
+        let monthlyPrice = subscription.monthlyProduct?.displayPrice ?? "$9.99"
+        let yearlyPrice = subscription.yearlyProduct?.displayPrice ?? "$89.99"
+        return "CanopyChat Plus is available as a monthly (\(monthlyPrice)/month) or yearly (\(yearlyPrice)/year) auto-renewable subscription. It renews automatically unless cancelled at least 24 hours before the end of the current period. Manage or cancel anytime from your Apple ID subscriptions."
     }
 
-    private var primaryButtonTitle: String {
+    private var monthlyButtonTitle: String {
         guard let product = subscription.monthlyProduct else {
-            return "Subscribe for $4.99/month"
+            return "$9.99/month"
         }
-        return "Subscribe for \(product.displayPrice)/month"
+        return "\(product.displayPrice)/month"
     }
 
-    private func handlePrimaryAction() {
-        Task { await subscription.purchaseMonthly() }
+    private var yearlyButtonTitle: String {
+        guard let product = subscription.yearlyProduct else {
+            return "$89.99/year"
+        }
+        return "\(product.displayPrice)/year"
     }
 
     private var cardBackground: Color {
