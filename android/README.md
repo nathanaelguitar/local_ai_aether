@@ -25,6 +25,8 @@ The Gradle wrapper (8.10.2) is checked in. With the Android SDK installed (Homeb
 
 ```sh
 cd android
+sdkmanager "ndk;26.3.11579264" "cmake;3.22.1"
+git submodule update --init --recursive
 ./gradlew assembleDebug
 # APK: app/build/outputs/apk/debug/app-debug.apk
 ```
@@ -48,19 +50,14 @@ with a networkSecurityConfig before any Play Store release.
 - **Backend provider (works today):** talks to any OpenAI-compatible endpoint, including
   the Ktor proxy in `../backend`. From the Android emulator, the host machine's
   `127.0.0.1` is reachable as `http://10.0.2.2:8787`.
-- **On-device llama.cpp (integration point ready):** `inference/InferenceEngine.kt`
-  defines `LlamaCppEngine` with the exact steps to wire in the official
-  `llama.cpp/examples/llama.android` JNI binding (build `libllama.so` with the NDK,
-  then implement `generate()` against the ChatML prompt from `PromptBuilder`).
-  `ModelStore` already handles the Hugging Face GGUF download/cache, mirroring iOS.
+- **On-device llama.cpp:** `inference/InferenceEngine.kt` uses the official llama.cpp
+  submodule and Android CMake target to build `libcanopy_llama.so` for arm64-v8a and
+  x86_64. The JNI wrapper loads GGUF models, generates text, and uses llama.cpp mtmd for
+  image attachments. `ModelStore` downloads and caches both the language model and vision
+  projector.
 
-## Not yet ported
+## Product setup still required
 
-- Attachments (camera/photos/files) — model fields exist and round-trip through SQLite;
-  the Compose input bar doesn't offer pickers yet.
-- Location-aware search-query localization (`AetherLocationService.swift`) — the
-  COARSE_LOCATION permission is declared; port uses Android `Geocoder` when added.
-- Subscription gating — the iOS app uses StoreKit; the Android equivalent is Google Play
-  Billing (`com.android.billingclient:billing-ktx`). The app is intentionally ungated
-  until the Play Console products exist.
-- Local "reply ready" notifications (POST_NOTIFICATIONS is declared for it).
+- Play Console subscription products must exist before Google Play prices or purchases
+  appear in the Plus surface. The app remains ungated until those products are configured.
+- Local "reply ready" notifications are not yet enabled.

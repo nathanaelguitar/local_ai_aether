@@ -11,9 +11,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalContext
+import com.nathanaelguitar.canopychat.core.CanopySubscriptionManager
 import com.nathanaelguitar.canopychat.ui.ChatScreen
 import com.nathanaelguitar.canopychat.ui.ConversationListScreen
 import com.nathanaelguitar.canopychat.ui.SettingsScreen
+import com.nathanaelguitar.canopychat.ui.PaywallScreen
 import com.nathanaelguitar.canopychat.ui.WelcomeScreen
 import java.util.UUID
 
@@ -35,17 +39,20 @@ private sealed interface Screen {
     data object Welcome : Screen
     data object Conversations : Screen
     data object Settings : Screen
+    data object Paywall : Screen
     data class Chat(val conversationId: UUID) : Screen
 }
 
 @Composable
 private fun CanopyNavHost(state: AppState) {
+    val context = LocalContext.current
+    val subscription = remember { CanopySubscriptionManager(context) }
     val isDark by state.isDarkTheme.collectAsState()
     var entered by rememberSaveable { mutableStateOf(false) }
-    var screen by androidx.compose.runtime.remember { mutableStateOf<Screen>(if (entered) Screen.Conversations else Screen.Welcome) }
+    var screen by remember { mutableStateOf<Screen>(if (entered) Screen.Conversations else Screen.Welcome) }
 
     // System back from Chat/Settings returns to the conversation list instead of exiting.
-    androidx.activity.compose.BackHandler(enabled = screen is Screen.Chat || screen is Screen.Settings) {
+    androidx.activity.compose.BackHandler(enabled = screen is Screen.Chat || screen is Screen.Settings || screen is Screen.Paywall) {
         screen = Screen.Conversations
     }
 
@@ -59,7 +66,12 @@ private fun CanopyNavHost(state: AppState) {
             onOpen = { screen = Screen.Chat(it) },
             onSettings = { screen = Screen.Settings }
         )
-        Screen.Settings -> SettingsScreen(state = state, onBack = { screen = Screen.Conversations })
+        Screen.Settings -> SettingsScreen(
+            state = state,
+            onBack = { screen = Screen.Conversations },
+            onSubscription = { screen = Screen.Paywall }
+        )
+        Screen.Paywall -> PaywallScreen(subscription = subscription, onBack = { screen = Screen.Settings })
         is Screen.Chat -> ChatScreen(
             state = state,
             conversationId = current.conversationId,

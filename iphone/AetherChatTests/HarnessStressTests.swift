@@ -159,6 +159,32 @@ final class HarnessStressTests: XCTestCase {
 
     // MARK: - Prompt budgeting under attachment spam
 
+    func testOfflineWebNoticeIsNotMandatoryOnEveryTurn() {
+        let first = AetherWebSearchIntent.offlineContext(for: "latest weather", includeUnavailableNotice: true)
+        let followUp = AetherWebSearchIntent.offlineContext(for: "latest weather", includeUnavailableNotice: false)
+
+        XCTAssertTrue(first.contains("briefly explain that live web access is unavailable"))
+        XCTAssertTrue(followUp.contains("do not repeat that fact"))
+        XCTAssertFalse(followUp.contains("Start by saying"))
+    }
+
+    func testPromptPreservesLatestUserLanguageAndAvoidsUnpromptedOfflineClaim() {
+        let messages = [ChatMessage(role: .user, content: "¿Cuáles artistas de reguetón son de Colombia?")]
+        let prompt = AetherPromptBuilder.prompt(persona: .default, messages: messages)
+
+        XCTAssertTrue(prompt.contains("same language as the latest user message"))
+        XCTAssertTrue(prompt.contains("Do not claim that web access is unavailable"))
+    }
+
+    func testSpanishFreshnessTermsTriggerGrounding() {
+        let query = AetherWebSearchIntent.query(
+            from: "¿Cuál es el precio actual de este producto?",
+            previousMessages: []
+        )
+
+        XCTAssertNotNil(query)
+    }
+
     private let mediaMarker = "<__media__>"
     private var tokenBudget: Int {
         Int(AetherModelCatalog.aetherV1ContextTokens - AetherModelCatalog.aetherV1MaxOutputTokens) - 64

@@ -181,6 +181,22 @@ class WebSearchService {
     private fun currentDateString(): String =
         DateFormat.getDateInstance(DateFormat.LONG, Locale.US).format(Date())
 
+    companion object {
+        fun offlineContext(query: String): String =
+            """
+            Web search was requested for: $query
+            Current date: ${DateFormat.getDateInstance(DateFormat.LONG, Locale.US).format(Date())}.
+
+            Network status: offline. CanopyChat does not currently have access to the web, likely because the device is in Airplane Mode or has no internet connection.
+
+            Offline response rules:
+            - Start by saying that web access is unavailable right now.
+            - Do not claim that web search was performed or cite sources.
+            - If you can answer from general knowledge, clearly label it as potentially outdated.
+            - For current events, prices, weather, sports scores, restaurants, local recommendations, IPO status, or news, do not invent current facts.
+            """.trimIndent()
+    }
+
     private fun formatContext(
         query: String,
         searchQuery: String,

@@ -313,7 +313,7 @@ enum AetherPromptBuilder {
         let personaInstructions = persona.instructions.trimmingCharacters(in: .whitespacesAndNewlines)
         let customInstructions = customSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         var prompt = "<|im_start|>system\n"
-        prompt += "You are \(persona.name), \(persona.description). Current date: \(Self.currentDateString()). Reply clearly and concisely. Do not expose hidden reasoning."
+        prompt += "You are \(persona.name), \(persona.description). Current date: \(Self.currentDateString()). Reply clearly and concisely. Respond in the same language as the latest user message unless the user asks for another language. Do not translate the user into English by default. Do not claim that web access is unavailable or that a search failed unless the system supplies web-grounding context that says so. Do not expose hidden reasoning."
         if !personaInstructions.isEmpty {
             prompt += "\nAssistant-specific instructions:\n\(personaInstructions)"
         }
@@ -485,7 +485,7 @@ final class AetherLlamaEngine {
         if attachments.isEmpty {
             try Task.checkCancellation()
             let promptTokens = try tokenize(prompt)
-            let reservedOutput = min(AetherModelCatalog.aetherV1MaxOutputTokens, 512)
+            let reservedOutput = AetherModelCatalog.aetherV1MaxOutputTokens
             guard !promptTokens.isEmpty, Int32(promptTokens.count) < contextTokens - reservedOutput - 32 else {
                 throw AetherOnDeviceError.tokenizationFailed
             }

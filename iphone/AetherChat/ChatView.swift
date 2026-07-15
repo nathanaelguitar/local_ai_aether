@@ -129,6 +129,9 @@ struct ChatView: View {
         }
         .alert("Rename Conversation", isPresented: $showingRenameDialog) {
             TextField("Conversation title", text: $titleDraft)
+            Button("Clear", role: .destructive) {
+                titleDraft = ""
+            }
             Button("Cancel", role: .cancel) {}
             Button("Save") {
                 state.renameConversation(conversationId, title: titleDraft)

@@ -473,7 +473,16 @@ enum AetherWebSearchIntent {
         "stock",
         "weather",
         "who won",
-        "what happened"
+        "what happened",
+        "último",
+        "última",
+        "actual",
+        "hoy",
+        "ahora",
+        "noticias",
+        "precio",
+        "clima",
+        "qué pasó"
     ]
 
     private static let stripPhrases = [
@@ -531,8 +540,11 @@ enum AetherWebSearchIntent {
         return nil
     }
 
-    static func offlineContext(for query: String) -> String {
+    static func offlineContext(for query: String, includeUnavailableNotice: Bool = true) -> String {
         let cleaned = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let noticeRule = includeUnavailableNotice
+            ? "- You may briefly explain that live web access is unavailable if that helps set expectations, but do not repeat a stock disclaimer on every follow-up."
+            : "- Live web access is unavailable for this turn, but do not repeat that fact unless the user asks about freshness or the answer genuinely depends on current information."
         return """
         Web search was requested for: \(cleaned)
         Current date: \(currentDateString()).
@@ -540,7 +552,7 @@ enum AetherWebSearchIntent {
         Network status: offline. CanopyChat does not currently have access to the web, likely because the device is in Airplane Mode or has no internet connection.
 
         Offline response rules:
-        - Start by saying: "It looks like we don't have access to the web right now."
+        \(noticeRule)
         - Do not claim that web search was performed.
         - Do not cite sources or mention search results.
         - If this is about current events, weather, prices, stocks, sports results, schedules, restaurants, local places, or anything that needs live information, say you do not have enough current information to answer reliably.

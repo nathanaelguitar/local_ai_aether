@@ -157,6 +157,7 @@ class AppState: ObservableObject {
     private let webSearch = AetherWebSearchService()
     private let locationService = AetherLocationService()
     private let networkMonitor = AetherNetworkMonitor()
+    private var offlineWebNoticeShownConversationIDs: Set<UUID> = []
 
     init(memoryStore: AetherMemoryStore = .shared) {
         self.memoryStore = memoryStore
@@ -379,7 +380,7 @@ class AppState: ObservableObject {
             var webSourcesMarkdown: String?
             if let webQuery {
                 if networkMonitor.hasReceivedStatus && !networkMonitor.isConnected {
-                    webSearchContext = AetherWebSearchIntent.offlineContext(for: webQuery)
+                    webSearchContext = offlineWebContext(for: webQuery, conversationID: id)
                     webSourcesMarkdown = nil
                 } else {
                     generationStatusMessage = "Searching the web"
@@ -389,7 +390,7 @@ class AppState: ObservableObject {
                         webSearchContext = searchResult.context
                         webSourcesMarkdown = searchResult.sourcesMarkdown
                     } catch {
-                        webSearchContext = AetherWebSearchIntent.offlineContext(for: webQuery)
+                        webSearchContext = offlineWebContext(for: webQuery, conversationID: id)
                         webSourcesMarkdown = nil
                     }
                 }
@@ -442,6 +443,14 @@ class AppState: ObservableObject {
             appendAssistantMessage(to: id, content: errorMessage)
             notifyIfNeeded(conversationTitle: conversations.first(where: { $0.id == id })?.title ?? "Canopy", response: errorMessage)
         }
+    }
+
+    private func offlineWebContext(for query: String, conversationID: UUID) -> String {
+        let includeNotice = offlineWebNoticeShownConversationIDs.insert(conversationID).inserted
+        return AetherWebSearchIntent.offlineContext(
+            for: query,
+            includeUnavailableNotice: includeNotice
+        )
     }
 
     private func generateReply(

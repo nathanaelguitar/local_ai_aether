@@ -84,7 +84,7 @@ struct AetherBackendClient: Sendable {
     ) -> [OpenAIRequestMessage] {
         let personaInstructions = persona.instructions.trimmingCharacters(in: .whitespacesAndNewlines)
         let customInstructions = customSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        var systemText = "You are \(persona.name), \(persona.description). Current date: \(Self.currentDateString()). Reply in a grounded, helpful tone."
+        var systemText = "You are \(persona.name), \(persona.description). Current date: \(Self.currentDateString()). Reply in a grounded, helpful tone. Respond in the same language as the latest user message unless the user asks for another language. Do not translate the user into English by default. Do not claim that web access is unavailable or that a search failed unless the system supplies web-grounding context that says so."
         if !personaInstructions.isEmpty {
             systemText += "\nAssistant-specific instructions:\n\(personaInstructions)"
         }

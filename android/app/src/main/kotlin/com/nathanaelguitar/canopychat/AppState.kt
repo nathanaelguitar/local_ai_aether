@@ -4,6 +4,8 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.nathanaelguitar.canopychat.core.AssistantPersona
+import com.nathanaelguitar.canopychat.core.CanopyLocationService
+import com.nathanaelguitar.canopychat.core.CanopyNetworkMonitor
 import com.nathanaelguitar.canopychat.core.ChatMessage
 import com.nathanaelguitar.canopychat.core.Conversation
 import com.nathanaelguitar.canopychat.core.InferenceProvider
@@ -22,6 +24,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import org.json.JSONArray
 import java.util.UUID
 
 // Android counterpart of AppState in iphone/AetherChat/Models.swift.
@@ -30,6 +33,8 @@ class AppState(application: Application) : AndroidViewModel(application) {
     private val prefs = application.getSharedPreferences("canopychat", Application.MODE_PRIVATE)
     private val memoryStore = MemoryStore(application)
     private val webSearch = WebSearchService()
+    private val locationService = CanopyLocationService(application)
+    private val networkMonitor = CanopyNetworkMonitor(application)
     private val modelStore = ModelStore(application.filesDir)
     private val onDevice = LlamaCppEngine(modelStore)
     private val backend = BackendInferenceEngine { apiEndpoint.value }
@@ -47,16 +52,26 @@ class AppState(application: Application) : AndroidViewModel(application) {
     val customSystemPrompt = MutableStateFlow(prefs.getString("customSystemPrompt", "") ?: "")
     val inferenceProvider = MutableStateFlow(InferenceProvider.from(prefs.getString("inferenceProvider", null)))
     val isDarkTheme = MutableStateFlow(prefs.getBoolean("isDarkTheme", false))
+    val defaultWorkspaceId = MutableStateFlow(prefs.getString("defaultWorkspaceId", "personal") ?: "personal")
 
-    val availableWorkspaces: List<Workspace> get() = Workspace.BUILT_INS
-    val availablePersonas: List<AssistantPersona> get() = AssistantPersona.ALL
+    private var customWorkspaces = loadWorkspaces()
+    private var customPersonas = loadPersonas()
+
+    val availableWorkspaces: List<Workspace> get() = Workspace.BUILT_INS + customWorkspaces
+    val availablePersonas: List<AssistantPersona>
+        get() = AssistantPersona.ALL + customPersonas.filter { persona ->
+            AssistantPersona.ALL.none { it.id == persona.id }
+        }
+    val defaultWorkspace: Workspace
+        get() = availableWorkspaces.firstOrNull { it.id == defaultWorkspaceId.value }
+            ?: Workspace.PERSONAL
 
     init {
         val saved = memoryStore.loadConversations()
         _conversations.value = if (saved.isEmpty()) {
             sampleConversations().also { memoryStore.saveAll(it) }
         } else {
-            saved.map(TitleGenerator::repairIfNeeded)
+            saved.map(::canonicalizeConversation).map(TitleGenerator::repairIfNeeded)
         }
     }
 
@@ -80,7 +95,77 @@ class AppState(application: Application) : AndroidViewModel(application) {
         prefs.edit().putString("inferenceProvider", provider.rawValue).apply()
     }
 
-    fun createConversation(title: String, workspace: Workspace, persona: AssistantPersona): UUID {
+    fun setDefaultWorkspace(workspace: Workspace) {
+        if (availableWorkspaces.none { it.id == workspace.id }) return
+        defaultWorkspaceId.value = workspace.id
+        prefs.edit().putString("defaultWorkspaceId", workspace.id).apply()
+    }
+
+    fun createCustomWorkspace(name: String): Workspace {
+        val workspace = Workspace.custom(name.trim().ifEmpty { "New Workspace" })
+        customWorkspaces = customWorkspaces + workspace
+        saveWorkspaces()
+        return workspace
+    }
+
+    fun deleteCustomWorkspace(workspace: Workspace) {
+        if (workspace.isBuiltIn) return
+        customWorkspaces = customWorkspaces.filterNot { it.id == workspace.id }
+        if (defaultWorkspace.id == workspace.id) setDefaultWorkspace(Workspace.PERSONAL)
+        _conversations.value = _conversations.value.map { conversation ->
+            if (conversation.workspace.id == workspace.id) {
+                conversation.copy(workspace = Workspace.PERSONAL).also { memoryStore.saveConversation(it) }
+            } else conversation
+        }
+        saveWorkspaces()
+    }
+
+    fun createCustomPersona(name: String, description: String, instructions: String): AssistantPersona {
+        val persona = AssistantPersona(
+            id = "custom-${UUID.randomUUID()}",
+            name = name.trim().ifEmpty { "Custom Assistant" },
+            description = description.trim().ifEmpty { "Custom assistant" },
+            instructions = instructions.trim()
+        )
+        customPersonas = customPersonas + persona
+        savePersonas()
+        return persona
+    }
+
+    fun updateCustomPersona(id: String, name: String, description: String, instructions: String): AssistantPersona? {
+        if (!id.startsWith("custom-")) return null
+        val updated = AssistantPersona(
+            id = id,
+            name = name.trim().ifEmpty { "Custom Assistant" },
+            description = description.trim().ifEmpty { "Custom assistant" },
+            instructions = instructions.trim()
+        )
+        if (customPersonas.none { it.id == id }) return null
+        customPersonas = customPersonas.map { if (it.id == id) updated else it }
+        _conversations.value = _conversations.value.map { conversation ->
+            if (conversation.persona.id == id) {
+                conversation.copy(persona = updated).also { memoryStore.saveConversation(it) }
+            } else conversation
+        }
+        savePersonas()
+        return updated
+    }
+
+    fun deleteCustomPersona(persona: AssistantPersona) {
+        if (!persona.id.startsWith("custom-")) return
+        customPersonas = customPersonas.filterNot { it.id == persona.id }
+        _conversations.value = _conversations.value.map { conversation ->
+            if (conversation.persona.id == persona.id) {
+                conversation.copy(persona = AssistantPersona.DEFAULT).also { memoryStore.saveConversation(it) }
+            } else conversation
+        }
+        savePersonas()
+    }
+
+    fun needsLocationPermissionFor(text: String): Boolean =
+        CanopyLocationService.needsLocation(text) && !locationService.hasLocationPermission()
+
+    fun createConversation(title: String, workspace: Workspace = defaultWorkspace, persona: AssistantPersona = AssistantPersona.DEFAULT): UUID {
         val conversation = Conversation(
             title = title.trim().ifEmpty { "Untitled" },
             workspace = workspace,
@@ -104,17 +189,17 @@ class AppState(application: Application) : AndroidViewModel(application) {
         updateConversation(id) { it.copy(title = title.trim().ifEmpty { "Untitled" }) }
     }
 
-    fun sendMessage(conversationId: UUID, text: String) {
+    fun sendMessage(conversationId: UUID, text: String, attachments: List<com.nathanaelguitar.canopychat.core.ChatAttachment> = emptyList()) {
         val conversation = _conversations.value.firstOrNull { it.id == conversationId } ?: return
         val priorMessages = conversation.messages
-        val userMessage = ChatMessage(role = MessageRole.USER, content = text)
+        val userMessage = ChatMessage(role = MessageRole.USER, content = text, attachments = attachments)
 
         updateConversation(conversationId) { current ->
-            val title = if (current.title == "Untitled") TitleGenerator.title(text, emptyList()) else current.title
+            val title = if (current.title == "Untitled") TitleGenerator.title(text, attachments) else current.title
             current.copy(
                 title = title,
                 messages = current.messages + userMessage,
-                previewText = text,
+                previewText = text.ifBlank { attachments.firstOrNull()?.displayName ?: "Attachment" },
                 updatedAtMillis = System.currentTimeMillis(),
                 memorySummary = MemoryPlanner.summary(current.messages + userMessage, current.memorySummary)
             )
@@ -123,7 +208,7 @@ class AppState(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _isSending.value = true
             try {
-                generateAndAppendReply(conversationId, priorMessages, text)
+            generateAndAppendReply(conversationId, priorMessages, text)
             } finally {
                 _isSending.value = false
                 _generationStatus.value = null
@@ -145,13 +230,19 @@ class AppState(application: Application) : AndroidViewModel(application) {
 
             var webSearchContext: String? = null
             var webSourcesMarkdown: String? = null
-            WebSearchIntent.query(latestUserText, priorMessages)?.let { webQuery ->
-                _generationStatus.value = "Searching the web"
-                try {
-                    val result = webSearch.search(webQuery)
-                    webSearchContext = result.context.ifEmpty { null }
-                    webSourcesMarkdown = result.sourcesMarkdown
-                } catch (_: Exception) {
+            WebSearchIntent.query(latestUserText, priorMessages)?.let { rawWebQuery ->
+                if (!networkMonitor.isConnected.value) {
+                    webSearchContext = WebSearchService.offlineContext(rawWebQuery)
+                } else {
+                    _generationStatus.value = "Searching the web"
+                    val webQuery = locationService.localizeSearchQuery(rawWebQuery, latestUserText)
+                    try {
+                        val result = webSearch.search(webQuery)
+                        webSearchContext = result.context.ifEmpty { null }
+                        webSourcesMarkdown = result.sourcesMarkdown
+                    } catch (_: Exception) {
+                        webSearchContext = WebSearchService.offlineContext(rawWebQuery)
+                    }
                 }
             }
 
@@ -221,6 +312,41 @@ class AppState(application: Application) : AndroidViewModel(application) {
             if (conversation.id == id) transform(conversation).also { updated = it } else conversation
         }
         updated?.let { memoryStore.saveConversation(it) }
+    }
+
+    private fun canonicalizeConversation(conversation: Conversation): Conversation {
+        val workspace = availableWorkspaces.firstOrNull { it.id == conversation.workspace.id } ?: Workspace.PERSONAL
+        val persona = availablePersonas.firstOrNull { it.id == conversation.persona.id } ?: AssistantPersona.DEFAULT
+        return conversation.copy(workspace = workspace, persona = persona)
+    }
+
+    private fun loadWorkspaces(): List<Workspace> = runCatching {
+        val raw = prefs.getString("customWorkspaces", "[]") ?: "[]"
+        val array = JSONArray(raw)
+        (0 until array.length()).map { Workspace.fromJson(array.getJSONObject(it)) }
+    }.getOrDefault(emptyList())
+
+    private fun saveWorkspaces() {
+        val array = JSONArray()
+        customWorkspaces.forEach { array.put(it.toJson()) }
+        prefs.edit().putString("customWorkspaces", array.toString()).apply()
+    }
+
+    private fun loadPersonas(): List<AssistantPersona> = runCatching {
+        val raw = prefs.getString("customPersonas", "[]") ?: "[]"
+        val array = JSONArray(raw)
+        (0 until array.length()).map { AssistantPersona.fromJson(array.getJSONObject(it)) }
+    }.getOrDefault(emptyList())
+
+    private fun savePersonas() {
+        val array = JSONArray()
+        customPersonas.forEach { array.put(it.toJson()) }
+        prefs.edit().putString("customPersonas", array.toString()).apply()
+    }
+
+    override fun onCleared() {
+        networkMonitor.close()
+        super.onCleared()
     }
 
     private fun sampleConversations(): List<Conversation> = listOf(
