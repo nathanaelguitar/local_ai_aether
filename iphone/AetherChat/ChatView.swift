@@ -1351,35 +1351,35 @@ struct InputBar: View {
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty
     }
 
+    nonisolated private var accessoryTint: Color {
+        isDark ? AetherColors.warmGray400 : AetherColors.warmGray500
+    }
+
+    nonisolated private func accessoryIcon(_ name: String) -> some View {
+        Image(systemName: name)
+            .font(.system(size: 17, weight: .medium))
+            .foregroundColor(accessoryTint)
+            .frame(width: 32, height: 44)
+            .contentShape(Rectangle())
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             AttachmentTray(attachments: $attachments)
 
-            HStack(spacing: 10) {
+            HStack(spacing: 2) {
                 Button(action: onFile) {
-                    Image(systemName: "paperclip")
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundColor(AetherColors.oakMedium)
-                        .frame(width: 32, height: 44)
-                        .contentShape(Rectangle())
+                    accessoryIcon("paperclip")
                 }
                 .disabled(isSending)
 
                 PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
-                    Image(systemName: "photo.on.rectangle.angled")
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundColor(AetherColors.oakMedium)
-                        .frame(width: 32, height: 44)
-                        .contentShape(Rectangle())
+                    accessoryIcon("photo.on.rectangle.angled")
                 }
                 .disabled(isSending)
 
                 Button(action: onCamera) {
-                    Image(systemName: "camera.fill")
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundColor(AetherColors.oakMedium)
-                        .frame(width: 32, height: 44)
-                        .contentShape(Rectangle())
+                    accessoryIcon("camera")
                 }
                 .disabled(isSending)
 
@@ -1387,11 +1387,7 @@ struct InputBar: View {
                     Button {
                         focused.wrappedValue = false
                     } label: {
-                        Image(systemName: "keyboard.chevron.compact.down")
-                            .font(.system(size: 17, weight: .semibold))
-                            .foregroundColor(AetherColors.oakMedium)
-                            .frame(width: 34, height: 44)
-                            .contentShape(Rectangle())
+                        accessoryIcon("keyboard.chevron.compact.down")
                     }
                     .transition(.move(edge: .leading).combined(with: .opacity))
                 }
@@ -1399,35 +1395,78 @@ struct InputBar: View {
                 TextField("Message your assistant...", text: $text, axis: .vertical)
                     .font(.system(size: 15))
                     .lineLimit(1...5)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    .background(isDark ? AetherColors.warmGray800 : AetherColors.warmGray100)
-                    .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 13)
                     .focused(focused)
 
                 Button(action: isSending ? onStop : onSend) {
                     ZStack {
                         Circle()
-                            .fill(!canSend && !isSending ? AetherColors.warmGray200 : AetherColors.oakMedium)
-                            .frame(width: 44, height: 44)
+                            .fill(
+                                !canSend && !isSending
+                                    ? AnyShapeStyle(isDark ? AetherColors.warmGray700 : AetherColors.warmGray200)
+                                    : AnyShapeStyle(LinearGradient(
+                                        colors: [AetherColors.oakLight, AetherColors.oakMedium],
+                                        startPoint: .top,
+                                        endPoint: .bottom
+                                    ))
+                            )
+                            .frame(width: 36, height: 36)
+                            .shadow(
+                                color: AetherColors.oakDark.opacity(canSend || isSending ? 0.3 : 0),
+                                radius: 6, y: 2
+                            )
                         if isSending {
                             Image(systemName: "stop.fill")
-                                .font(.system(size: 14, weight: .bold))
+                                .font(.system(size: 13, weight: .bold))
                                 .foregroundColor(.white)
                         } else {
                             Image(systemName: "arrow.up")
-                                .font(.system(size: 17, weight: .semibold))
-                                .foregroundColor(.white)
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(!canSend ? accessoryTint : .white)
                         }
                     }
+                    .scaleEffect(canSend || isSending ? 1 : 0.92)
                 }
                 .disabled(!canSend && !isSending)
+                .padding(.trailing, 6)
+                .animation(.spring(response: 0.3, dampingFraction: 0.7), value: canSend)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
+            .padding(.leading, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 26, style: .continuous)
+                    .fill(isDark ? AetherColors.warmGray800 : Color.white)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 26, style: .continuous)
+                            .strokeBorder(
+                                LinearGradient(
+                                    colors: isDark
+                                        ? [Color.white.opacity(0.12), Color.white.opacity(0.03)]
+                                        : [AetherColors.oakPale.opacity(0.8), AetherColors.oakPale.opacity(0.3)],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                ),
+                                lineWidth: 1
+                            )
+                    )
+                    .shadow(color: AetherColors.oakDark.opacity(isDark ? 0.45 : 0.10), radius: 16, y: 6)
+                    .shadow(color: AetherColors.oakDark.opacity(isDark ? 0.3 : 0.05), radius: 2, y: 1)
+            )
+            .padding(.horizontal, 12)
+            .padding(.top, 8)
+            .padding(.bottom, 6)
         }
-        .background(isDark ? AetherColors.warmGray900 : Color.white)
-        .shadow(color: .black.opacity(0.08), radius: 12, y: -2)
+        .background(
+            LinearGradient(
+                colors: [
+                    (isDark ? AetherColors.warmGray900 : AetherColors.oakCream).opacity(0),
+                    (isDark ? AetherColors.warmGray900 : AetherColors.oakCream).opacity(0.9)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea(edges: .bottom)
+        )
         .animation(.easeInOut(duration: 0.18), value: focused.wrappedValue)
         .animation(.easeInOut(duration: 0.18), value: attachments.count)
     }
