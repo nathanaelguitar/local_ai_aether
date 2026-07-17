@@ -509,12 +509,10 @@ enum AetherWebSearchIntent {
         "find out"
     ]
 
-    private static let informationQuestionPrefixes = [
-        "what is ", "what are ", "what's ", "who is ", "where is ", "when is ",
-        "when did ", "why is ", "why are ", "how does ", "how do ", "how can ",
-        "how to ", "which ", "tell me about ", "explain ", "define ",
-        "qué ", "cuál ", "cuáles ", "quién ", "quiénes ", "dónde ", "cuándo ",
-        "por qué ", "cómo ", "dime sobre ", "explícame ", "define "
+    private static let entityLookupPrefixes = [
+        "who is ", "who are ", "who was ", "where is ", "when is ", "which ",
+        "tell me about ", "sabe quién ", "quién es ", "quiénes son ", "conoces a ",
+        "cuáles artistas ", "qué artistas ", "dime sobre "
     ]
 
     private static let conversationalPhrases = [
@@ -522,6 +520,11 @@ enum AetherWebSearchIntent {
         "do you speak ", "can you speak ", "are you ", "who are you", "how are you",
         "what do you do", "what can you do", "can you help", "hablas español",
         "habla español", "tú hablas", "tu hablas", "puedes hablar"
+    ]
+
+    private static let sourceRequestPhrases = [
+        "cite sources", "provide sources", "include sources", "with sources",
+        "con fuentes", "cita fuentes", "fuentes"
     ]
 
     private static let weakFollowUpWords: Set<String> = [
@@ -566,7 +569,8 @@ enum AetherWebSearchIntent {
         if conversationalPhrases.contains(where: { normalized.contains($0) }) {
             return false
         }
-        return informationQuestionPrefixes.contains(where: { normalized.hasPrefix($0) })
+        return entityLookupPrefixes.contains(where: { normalized.hasPrefix($0) })
+            || sourceRequestPhrases.contains(where: { normalized.contains($0) })
     }
 
     static func offlineContext(for query: String, includeUnavailableNotice: Bool = true) -> String {

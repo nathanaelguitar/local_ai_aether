@@ -198,6 +198,29 @@ final class HarnessStressTests: XCTestCase {
         )
 
         XCTAssertEqual(query, "Cuáles artistas de reguetón son de Colombia")
+        XCTAssertNotNil(AetherWebSearchIntent.query(from: "Sabe quién es el cantante Blessd de Colombia", previousMessages: []))
+    }
+
+    func testStableKnowledgeQuestionsStayOnDevice() {
+        XCTAssertNil(AetherWebSearchIntent.query(from: "What's the quadratic formula?", previousMessages: []))
+        XCTAssertNil(AetherWebSearchIntent.query(from: "Explain recursion in Swift", previousMessages: []))
+    }
+
+    func testDisplayNormalizerConvertsCommonLatexWithoutTouchingCode() {
+        let response = """
+        The formula is:
+
+        $$x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}$$
+
+        ```text
+        $$keep this literal$$
+        ```
+        """
+
+        let normalized = AetherResponseNormalizer.displayText(response)
+        XCTAssertTrue(normalized.contains("x = (-b ± √(b^2 - 4ac)) / (2a)"))
+        XCTAssertTrue(normalized.contains("$$keep this literal$$"))
+        XCTAssertFalse(normalized.contains("\\frac"))
     }
 
     func testTokenPiecesAreDecodedAsOneUTF8Stream() {

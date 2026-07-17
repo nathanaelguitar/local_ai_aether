@@ -39,6 +39,143 @@ enum AetherBackgroundTask {
     }
 }
 
+enum AetherResponseNormalizer {
+    static func displayText(_ response: String) -> String {
+        let normalized = response
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+        let lines = normalized.components(separatedBy: "\n")
+        var inCodeFence = false
+        var output: [String] = []
+
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("```") {
+                inCodeFence.toggle()
+                output.append(line)
+            } else if inCodeFence {
+                output.append(line)
+            } else {
+                output.append(normalizeMath(in: line))
+            }
+        }
+
+        return output.joined(separator: "\n")
+    }
+
+    private static func normalizeMath(in source: String) -> String {
+        var text = source
+            .replacingOccurrences(of: "$$", with: "")
+            .replacingOccurrences(of: "\\[", with: "")
+            .replacingOccurrences(of: "\\]", with: "")
+            .replacingOccurrences(of: "\\(", with: "")
+            .replacingOccurrences(of: "\\)", with: "")
+
+        text = replaceTwoArgumentCommand(in: text, command: "frac") { numerator, denominator in
+            "(\(normalizeMath(in: numerator))) / (\(normalizeMath(in: denominator)))"
+        }
+        text = replaceOneArgumentCommand(in: text, command: "sqrt") { argument in
+            "√(\(normalizeMath(in: argument)))"
+        }
+        text = replaceOneArgumentCommand(in: text, command: "text") { argument in
+            normalizeMath(in: argument)
+        }
+        return normalizeFormula(text)
+    }
+
+    private static func normalizeFormula(_ source: String) -> String {
+        source
+            .replacingOccurrences(of: "\\pm", with: "±")
+            .replacingOccurrences(of: "\\mp", with: "∓")
+            .replacingOccurrences(of: "\\times", with: "×")
+            .replacingOccurrences(of: "\\cdot", with: "·")
+            .replacingOccurrences(of: "\\leq", with: "≤")
+            .replacingOccurrences(of: "\\geq", with: "≥")
+            .replacingOccurrences(of: "\\neq", with: "≠")
+            .replacingOccurrences(of: "\\left", with: "")
+            .replacingOccurrences(of: "\\right", with: "")
+            .replacingOccurrences(of: "\\,", with: " ")
+            .replacingOccurrences(of: "\\!", with: "")
+            .replacingOccurrences(of: "\\%", with: "%")
+            .replacingOccurrences(of: "{", with: "(")
+            .replacingOccurrences(of: "}", with: ")")
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func replaceOneArgumentCommand(
+        in source: String,
+        command: String,
+        transform: (String) -> String
+    ) -> String {
+        let marker = "\\\(command){"
+        var result = ""
+        var cursor = source.startIndex
+
+        while let markerRange = source.range(of: marker, range: cursor..<source.endIndex),
+              let closingBrace = matchingBrace(in: source, openingAt: source.index(before: markerRange.upperBound)) {
+            result += source[cursor..<markerRange.lowerBound]
+            let bodyStart = markerRange.upperBound
+            result += transform(String(source[bodyStart..<closingBrace]))
+            cursor = source.index(after: closingBrace)
+        }
+
+        result += source[cursor..<source.endIndex]
+        return result
+    }
+
+    private static func replaceTwoArgumentCommand(
+        in source: String,
+        command: String,
+        transform: (String, String) -> String
+    ) -> String {
+        let marker = "\\\(command)"
+        var result = ""
+        var cursor = source.startIndex
+
+        while let markerRange = source.range(of: marker, range: cursor..<source.endIndex),
+              let firstOpening = nextOpeningBrace(in: source, after: markerRange.upperBound),
+              let firstClosing = matchingBrace(in: source, openingAt: firstOpening),
+              let secondOpening = nextOpeningBrace(in: source, after: source.index(after: firstClosing)),
+              let secondClosing = matchingBrace(in: source, openingAt: secondOpening) {
+            result += source[cursor..<markerRange.lowerBound]
+            let numerator = String(source[source.index(after: firstOpening)..<firstClosing])
+            let denominator = String(source[source.index(after: secondOpening)..<secondClosing])
+            result += transform(numerator, denominator)
+            cursor = source.index(after: secondClosing)
+        }
+
+        result += source[cursor..<source.endIndex]
+        return result
+    }
+
+    private static func nextOpeningBrace(in source: String, after index: String.Index) -> String.Index? {
+        var cursor = index
+        while cursor < source.endIndex {
+            if source[cursor] == "{" { return cursor }
+            if !source[cursor].isWhitespace { return nil }
+            cursor = source.index(after: cursor)
+        }
+        return nil
+    }
+
+    private static func matchingBrace(in source: String, openingAt opening: String.Index) -> String.Index? {
+        guard opening < source.endIndex, source[opening] == "{" else { return nil }
+        var depth = 0
+        var cursor = opening
+        while cursor < source.endIndex {
+            if source[cursor] == "{" {
+                depth += 1
+            } else if source[cursor] == "}" {
+                depth -= 1
+                if depth == 0 { return cursor }
+            }
+            cursor = source.index(after: cursor)
+        }
+        return nil
+    }
+}
+
 struct Conversation: Identifiable, Codable, Sendable {
     let id: UUID
     var title: String
@@ -433,6 +570,7 @@ class AppState: ObservableObject {
                     response = fallbackRedirectResponse(latestUserText: latestUserText)
                 }
             }
+            response = AetherResponseNormalizer.displayText(response)
             response = responseWithSources(response, sourcesMarkdown: webSourcesMarkdown)
             modelLoadingMessage = nil
             generationStatusMessage = nil
