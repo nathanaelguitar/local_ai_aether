@@ -185,6 +185,17 @@ final class HarnessStressTests: XCTestCase {
         XCTAssertNotNil(query)
     }
 
+    func testTokenPiecesAreDecodedAsOneUTF8Stream() {
+        let squareRoot = [
+            [UInt8]([0xE2]),
+            [UInt8]([0x88, 0x9A])
+        ]
+        let bytes = squareRoot.flatMap { $0 }
+
+        XCTAssertEqual(String(decoding: bytes, as: UTF8.self), "√")
+        XCTAssertNotEqual(String(decoding: squareRoot[0], as: UTF8.self), "√")
+    }
+
     private let mediaMarker = "<__media__>"
     private var tokenBudget: Int {
         Int(AetherModelCatalog.aetherV1ContextTokens - AetherModelCatalog.aetherV1MaxOutputTokens) - 64

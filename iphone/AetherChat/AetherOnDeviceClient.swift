@@ -502,11 +502,17 @@ final class AetherLlamaEngine {
     }
 
     private func generateCompletion(startPosition: Int32, previousToken: llama_token) throws -> String {
-        var generated = ""
+        // llama_token_to_piece returns UTF-8 bytes, and a Unicode scalar can be
+        // split across adjacent token pieces. Keep the bytes intact until the
+        // full completion is available; decoding each piece independently turns
+        // valid characters such as √ into replacement characters (�).
+        var generatedBytes = [UInt8]()
         var position = startPosition
         var previousToken = previousToken
         var batch = llama_batch_init(AetherModelCatalog.aetherV1BatchTokens, 0, 1)
         defer { llama_batch_free(batch) }
+
+        let endMarker = Array("<|im_end|>".utf8)
 
         for _ in 0..<AetherModelCatalog.aetherV1MaxOutputTokens {
             try Task.checkCancellation()
@@ -514,14 +520,13 @@ final class AetherLlamaEngine {
                 break
             }
             let next = try sampleGreedy()
-            if next == llama_vocab_eos(vocab) || next == previousToken && generated.isEmpty {
+            if next == llama_vocab_eos(vocab) || next == previousToken && generatedBytes.isEmpty {
                 break
             }
 
-            let piece = tokenPiece(next)
-            generated += piece
-            if generated.contains("<|im_end|>") {
-                generated = generated.components(separatedBy: "<|im_end|>").first ?? generated
+            generatedBytes.append(contentsOf: tokenPiece(next))
+            if let markerStart = generatedBytes.firstRange(of: endMarker)?.lowerBound {
+                generatedBytes.removeSubrange(markerStart...)
                 break
             }
 
@@ -530,7 +535,7 @@ final class AetherLlamaEngine {
             previousToken = next
         }
 
-        let cleaned = clean(generated)
+        let cleaned = clean(String(decoding: generatedBytes, as: UTF8.self))
         guard !cleaned.isEmpty else {
             throw AetherOnDeviceError.emptyResponse
         }
@@ -681,13 +686,17 @@ final class AetherLlamaEngine {
         return bestToken
     }
 
-    private func tokenPiece(_ token: llama_token) -> String {
+    private func tokenPiece(_ token: llama_token) -> [UInt8] {
         var buffer = [CChar](repeating: 0, count: 256)
-        let count = llama_token_to_piece(vocab, token, &buffer, Int32(buffer.count), 0, false)
-        guard count > 0 else {
-            return ""
+        var count = llama_token_to_piece(vocab, token, &buffer, Int32(buffer.count), 0, false)
+        if count < 0 {
+            buffer = [CChar](repeating: 0, count: -Int(count))
+            count = llama_token_to_piece(vocab, token, &buffer, Int32(buffer.count), 0, false)
         }
-        return String(decoding: buffer.prefix(Int(count)).map { UInt8(bitPattern: $0) }, as: UTF8.self)
+        guard count > 0 else {
+            return []
+        }
+        return buffer.prefix(Int(count)).map { UInt8(bitPattern: $0) }
     }
 
     private func clean(_ text: String) -> String {
