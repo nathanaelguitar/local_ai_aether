@@ -29,6 +29,12 @@ struct AetherWebCitation: Sendable {
     }
 }
 
+struct AetherWebSearchSuggestion: Identifiable, Sendable {
+    let id = UUID()
+    let conversationID: UUID
+    let query: String
+}
+
 enum AetherWebSearchError: Error {
     case unavailable
     case emptyResults
@@ -560,6 +566,12 @@ enum AetherWebSearchIntent {
         }
 
         return nil
+    }
+
+    static func explicitQuery(from currentText: String, previousMessages: [ChatMessage]) -> String? {
+        let lowercased = currentText.lowercased()
+        guard explicitSearchPhrases.contains(where: { lowercased.contains($0) }) else { return nil }
+        return query(from: currentText, previousMessages: previousMessages)
     }
 
     private static func isLikelyInformationRequest(_ lowercased: String) -> Bool {

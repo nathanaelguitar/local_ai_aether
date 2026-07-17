@@ -206,6 +206,12 @@ final class HarnessStressTests: XCTestCase {
         XCTAssertNil(AetherWebSearchIntent.query(from: "Explain recursion in Swift", previousMessages: []))
     }
 
+    func testOnlyExplicitSearchRequestsAreAutomatic() {
+        XCTAssertNil(AetherWebSearchIntent.explicitQuery(from: "What's the weather today?", previousMessages: []))
+        XCTAssertNotNil(AetherWebSearchIntent.explicitQuery(from: "Search the web for today's weather", previousMessages: []))
+        XCTAssertNotNil(AetherWebSearchIntent.query(from: "What's the weather today?", previousMessages: []))
+    }
+
     func testDisplayNormalizerConvertsCommonLatexWithoutTouchingCode() {
         let response = """
         The formula is:

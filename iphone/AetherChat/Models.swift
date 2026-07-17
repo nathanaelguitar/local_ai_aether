@@ -275,6 +275,7 @@ class AppState: ObservableObject {
     @Published var modelLoadingMessage: String?
     @Published var generationStatusMessage: String?
     @Published var streamingPreview: String?
+    @Published var webSearchSuggestion: AetherWebSearchSuggestion?
     @Published var appIsActive = true
     @Published var defaultWorkspace: Workspace = .personal
     @Published var messageFontScale: Double = UserDefaults.standard.double(forKey: "messageFontScale") == 0 ? 1.0 : UserDefaults.standard.double(forKey: "messageFontScale") {
@@ -416,6 +417,7 @@ class AppState: ObservableObject {
 
     func sendMessage(in id: UUID, text: String, attachments: [ChatAttachment] = []) async {
         guard let idx = conversations.firstIndex(where: { $0.id == id }) else { return }
+        webSearchSuggestion = nil
         Task { await AetherNotifications.requestAuthorization() }
         let priorMessages = conversations[idx].messages
         let userMsg = ChatMessage(role: .user, content: text, attachments: attachments)
@@ -436,6 +438,7 @@ class AppState: ObservableObject {
 
     func editUserMessage(in id: UUID, messageID: UUID, text: String) async {
         guard let conversationIndex = conversations.firstIndex(where: { $0.id == id }) else { return }
+        webSearchSuggestion = nil
         guard let messageIndex = conversations[conversationIndex].messages.firstIndex(where: { $0.id == messageID }) else { return }
         guard conversations[conversationIndex].messages[messageIndex].role == .user else { return }
 
@@ -469,7 +472,7 @@ class AppState: ObservableObject {
         )
     }
 
-    func regenerateLastResponse(in id: UUID) async {
+    func regenerateLastResponse(in id: UUID, forcedWebSearchQuery: String? = nil) async {
         guard let idx = conversations.firstIndex(where: { $0.id == id }) else { return }
         guard let lastAssistantIndex = conversations[idx].messages.lastIndex(where: { $0.role == .assistant }) else { return }
         let promptMessages = Array(conversations[idx].messages.prefix(upTo: lastAssistantIndex))
@@ -490,8 +493,15 @@ class AppState: ObservableObject {
             messageSnapshot: promptMessages,
             priorMessages: priorMessages,
             latestUserText: latestUser.content,
-            memoryContext: memoryContext
+            memoryContext: memoryContext,
+            forcedWebSearchQuery: forcedWebSearchQuery
         )
+    }
+
+    func searchWebAndRegenerate(in id: UUID) async {
+        guard let suggestion = webSearchSuggestion, suggestion.conversationID == id else { return }
+        webSearchSuggestion = nil
+        await regenerateLastResponse(in: id, forcedWebSearchQuery: suggestion.query)
     }
 
     private func generateAndAppendReply(
@@ -500,8 +510,10 @@ class AppState: ObservableObject {
         messageSnapshot: [ChatMessage],
         priorMessages: [ChatMessage],
         latestUserText: String,
-        memoryContext: String?
+        memoryContext: String?,
+        forcedWebSearchQuery: String? = nil
     ) async {
+        webSearchSuggestion = nil
         beginInferenceActivity()
         let task = AetherBackgroundTask.begin(name: "Aether V1 inference") { [weak self] in
             Task { @MainActor in
@@ -519,7 +531,12 @@ class AppState: ObservableObject {
             generationStatusMessage = messageSnapshot.contains(where: { !$0.attachments.isEmpty })
                 ? "Reading attachments and the conversation"
                 : "Reading the conversation"
-            let webQuery = AetherWebSearchIntent.query(from: latestUserText, previousMessages: priorMessages)
+            let candidateWebQuery = AetherWebSearchIntent.query(from: latestUserText, previousMessages: priorMessages)
+            let explicitWebQuery = AetherWebSearchIntent.explicitQuery(from: latestUserText, previousMessages: priorMessages)
+            let webQuery = forcedWebSearchQuery ?? explicitWebQuery
+            let shouldOfferSearch = forcedWebSearchQuery == nil
+                && explicitWebQuery == nil
+                && candidateWebQuery != nil
             var webSearchContext: String?
             var webSourcesMarkdown: String?
             if let webQuery {
@@ -572,6 +589,11 @@ class AppState: ObservableObject {
             }
             response = AetherResponseNormalizer.displayText(response)
             response = responseWithSources(response, sourcesMarkdown: webSourcesMarkdown)
+            if shouldOfferSearch,
+               let candidateWebQuery,
+               !networkMonitor.hasReceivedStatus || networkMonitor.isConnected {
+                webSearchSuggestion = AetherWebSearchSuggestion(conversationID: id, query: candidateWebQuery)
+            }
             modelLoadingMessage = nil
             generationStatusMessage = nil
             streamingPreview = nil
