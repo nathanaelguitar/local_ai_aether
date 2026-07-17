@@ -185,6 +185,21 @@ final class HarnessStressTests: XCTestCase {
         XCTAssertNotNil(query)
     }
 
+    func testConversationalLanguageQuestionsDoNotTriggerGrounding() {
+        XCTAssertNil(AetherWebSearchIntent.query(from: "¿Tú hablas español?", previousMessages: []))
+        XCTAssertNil(AetherWebSearchIntent.query(from: "Do you speak Spanish?", previousMessages: []))
+        XCTAssertNil(AetherWebSearchIntent.query(from: "No habla español", previousMessages: []))
+    }
+
+    func testSpanishInformationQuestionsStillTriggerGrounding() {
+        let query = AetherWebSearchIntent.query(
+            from: "¿Cuáles artistas de reguetón son de Colombia?",
+            previousMessages: []
+        )
+
+        XCTAssertEqual(query, "Cuáles artistas de reguetón son de Colombia")
+    }
+
     func testTokenPiecesAreDecodedAsOneUTF8Stream() {
         let squareRoot = [
             [UInt8]([0xE2]),

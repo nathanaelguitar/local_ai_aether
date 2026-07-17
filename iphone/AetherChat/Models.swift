@@ -137,6 +137,7 @@ class AppState: ObservableObject {
     }
     @Published var modelLoadingMessage: String?
     @Published var generationStatusMessage: String?
+    @Published var streamingPreview: String?
     @Published var appIsActive = true
     @Published var defaultWorkspace: Workspace = .personal
     @Published var messageFontScale: Double = UserDefaults.standard.double(forKey: "messageFontScale") == 0 ? 1.0 : UserDefaults.standard.double(forKey: "messageFontScale") {
@@ -158,6 +159,7 @@ class AppState: ObservableObject {
     private let locationService = AetherLocationService()
     private let networkMonitor = AetherNetworkMonitor()
     private var offlineWebNoticeShownConversationIDs: Set<UUID> = []
+    private var activeInferenceCount = 0
 
     init(memoryStore: AetherMemoryStore = .shared) {
         self.memoryStore = memoryStore
@@ -363,13 +365,18 @@ class AppState: ObservableObject {
         latestUserText: String,
         memoryContext: String?
     ) async {
+        beginInferenceActivity()
         let task = AetherBackgroundTask.begin(name: "Aether V1 inference") { [weak self] in
             Task { @MainActor in
                 self?.modelLoadingMessage = nil
                 self?.generationStatusMessage = nil
+                self?.streamingPreview = nil
             }
         }
-        defer { AetherBackgroundTask.end(task) }
+        defer {
+            AetherBackgroundTask.end(task)
+            endInferenceActivity()
+        }
 
         do {
             generationStatusMessage = messageSnapshot.contains(where: { !$0.attachments.isEmpty })
@@ -429,19 +436,34 @@ class AppState: ObservableObject {
             response = responseWithSources(response, sourcesMarkdown: webSourcesMarkdown)
             modelLoadingMessage = nil
             generationStatusMessage = nil
+            streamingPreview = nil
             appendAssistantMessage(to: id, content: response)
             notifyIfNeeded(conversationTitle: conversations.first(where: { $0.id == id })?.title ?? "Canopy", response: response)
         } catch is CancellationError {
             modelLoadingMessage = nil
             generationStatusMessage = nil
+            streamingPreview = nil
             appendAssistantMessage(to: id, content: "Response stopped.")
         } catch {
             modelLoadingMessage = nil
             generationStatusMessage = nil
+            streamingPreview = nil
             let errorMessage = localBackgroundInterruptionMessage(for: error)
                 ?? "Inference error: \(inferenceErrorDescription(error))"
             appendAssistantMessage(to: id, content: errorMessage)
             notifyIfNeeded(conversationTitle: conversations.first(where: { $0.id == id })?.title ?? "Canopy", response: errorMessage)
+        }
+    }
+
+    private func beginInferenceActivity() {
+        activeInferenceCount += 1
+        UIApplication.shared.isIdleTimerDisabled = true
+    }
+
+    private func endInferenceActivity() {
+        activeInferenceCount = max(0, activeInferenceCount - 1)
+        if activeInferenceCount == 0 {
+            UIApplication.shared.isIdleTimerDisabled = false
         }
     }
 
@@ -461,6 +483,7 @@ class AppState: ObservableObject {
         customSystemPrompt: String = ""
     ) async throws -> String {
         if selectedModel == AetherModelCatalog.aetherV1DisplayName {
+            streamingPreview = nil
             return try await onDevice.send(
                 persona: persona,
                 messages: messages,
@@ -475,6 +498,11 @@ class AppState: ObservableObject {
                             self?.modelLoadingMessage = nil
                             self?.generationStatusMessage = "Composing a response"
                         }
+                    }
+                },
+                onToken: { [weak self] preview in
+                    Task { @MainActor in
+                        self?.streamingPreview = preview
                     }
                 }
             )

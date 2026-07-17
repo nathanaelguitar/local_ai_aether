@@ -509,6 +509,21 @@ enum AetherWebSearchIntent {
         "find out"
     ]
 
+    private static let informationQuestionPrefixes = [
+        "what is ", "what are ", "what's ", "who is ", "where is ", "when is ",
+        "when did ", "why is ", "why are ", "how does ", "how do ", "how can ",
+        "how to ", "which ", "tell me about ", "explain ", "define ",
+        "qué ", "cuál ", "cuáles ", "quién ", "quiénes ", "dónde ", "cuándo ",
+        "por qué ", "cómo ", "dime sobre ", "explícame ", "define "
+    ]
+
+    private static let conversationalPhrases = [
+        "hello", "hi ", "hey ", "hola", "gracias", "thank you", "thanks",
+        "do you speak ", "can you speak ", "are you ", "who are you", "how are you",
+        "what do you do", "what can you do", "can you help", "hablas español",
+        "habla español", "tú hablas", "tu hablas", "puedes hablar"
+    ]
+
     private static let weakFollowUpWords: Set<String> = [
         "are", "you", "sure", "really", "verify", "check", "confirm", "that", "this",
         "it", "they", "them", "he", "she", "their", "its", "did", "does", "do", "ipo"
@@ -520,7 +535,11 @@ enum AetherWebSearchIntent {
 
         let lc = current.lowercased()
         let explicitSearch = explicitSearchPhrases.contains { lc.contains($0) }
+        let hasSearchTrigger = triggerPhrases.contains { lc.contains($0) }
         if let stripped = strippedSearchText(from: current), !stripped.isEmpty {
+            guard explicitSearch || hasSearchTrigger || isLikelyInformationRequest(lc) else {
+                return nil
+            }
             if explicitSearch, isWeakFollowUp(stripped), let prior = contextualPreviousQuery(from: previousMessages) {
                 return prior
             }
@@ -530,7 +549,7 @@ enum AetherWebSearchIntent {
             return contextualizedQuery(stripped, previousMessages: previousMessages)
         }
 
-        if triggerPhrases.contains(where: { lc.contains($0) }) {
+        if hasSearchTrigger {
             if let prior = contextualPreviousQuery(from: previousMessages) {
                 return prior
             }
@@ -538,6 +557,16 @@ enum AetherWebSearchIntent {
         }
 
         return nil
+    }
+
+    private static func isLikelyInformationRequest(_ lowercased: String) -> Bool {
+        let normalized = lowercased
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: .punctuationCharacters)
+        if conversationalPhrases.contains(where: { normalized.contains($0) }) {
+            return false
+        }
+        return informationQuestionPrefixes.contains(where: { normalized.hasPrefix($0) })
     }
 
     static func offlineContext(for query: String, includeUnavailableNotice: Bool = true) -> String {
