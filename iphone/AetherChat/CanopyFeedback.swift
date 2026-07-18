@@ -164,9 +164,10 @@ final class AetherBetaTelemetry {
 
 @MainActor
 enum CanopyFeedback {
-    nonisolated static let supportEmail = "consulting.nathanael@gmail.com"
+    nonisolated static let supportEmail = "support@canopychat.app"
 
     static func modelFeedback(message: ChatMessage, conversation: Conversation?) -> String {
+        let prompt = promptText(for: message, conversation: conversation)
         let cleanedResponse = plainText(message.content.trimmingCharacters(in: .whitespacesAndNewlines))
         return """
         CanopyChat Model Feedback
@@ -178,6 +179,10 @@ enum CanopyFeedback {
 
         WHAT WERE YOU EXPECTING?
         If you can, describe the answer or behavior you wanted instead.
+
+
+        USER PROMPT
+        \(prompt)
 
 
         MODEL RESPONSE
@@ -194,6 +199,24 @@ enum CanopyFeedback {
         Device: \(UIDevice.current.model)
         iOS: \(UIDevice.current.systemVersion)
         """
+    }
+
+    private static func promptText(for message: ChatMessage, conversation: Conversation?) -> String {
+        guard let conversation,
+              let responseIndex = conversation.messages.firstIndex(where: { $0.id == message.id }),
+              let userMessage = conversation.messages[..<responseIndex].last(where: { $0.role == .user }) else {
+            return "(Prompt text unavailable.)"
+        }
+
+        let text = plainText(userMessage.content.trimmingCharacters(in: .whitespacesAndNewlines))
+        if !text.isEmpty {
+            return text
+        }
+
+        let attachmentNames = userMessage.attachments.map(\.displayName).joined(separator: ", ")
+        return attachmentNames.isEmpty
+            ? "(No text prompt.)"
+            : "(Attachment-only prompt: \(attachmentNames))"
     }
 
     static func appIssue(conversation: Conversation? = nil) -> String {

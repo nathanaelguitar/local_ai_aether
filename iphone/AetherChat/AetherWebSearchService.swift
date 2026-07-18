@@ -142,7 +142,7 @@ struct AetherWebSearchService: Sendable {
         }
 
         if isSportsTournamentQuery(lowercased) {
-            return "\(query) FIFA ESPN CBS Sports Sporting News Sports Illustrated eliminated qualified bracket remaining teams \(currentDateString())"
+            return "\(query) FIFA official current result winner status host countries tournament dates ESPN CBS Sports bracket remaining teams \(currentDateString())"
         }
 
         return query
@@ -206,6 +206,7 @@ struct AetherWebSearchService: Sendable {
             - Prefer higher-ranked sources first. Reuters, SEC, Nasdaq, AP, CNBC, Yahoo Finance, and official company/investor pages outrank SEO blogs, ads, and anonymous trackers.
             - For public-company, IPO, ticker, stock, price, and date questions, answer only what these sources explicitly support.
             \(sportsRules)
+            - Do not use general knowledge to fill a gap in the search results. If the results do not explicitly establish a winner, location, date, score, or status, say that the search results do not establish it.
             - Treat "planned", "targeted", "expected", and "projected" claims as stale when stronger sources say the event priced, raised money, listed, began trading, or completed.
             - If sources conflict, say that the results conflict and summarize the strongest source rather than inventing a compromise.
             - Do not repeat claims from sponsored links or low-ranked snippets when a higher-ranked source disagrees.
@@ -225,6 +226,7 @@ struct AetherWebSearchService: Sendable {
         Grounding rules:
         - Answer only facts explicitly present in the search text below.
         - If the search text is noisy or contradictory, say that and avoid inventing dates, tickers, prices, or amounts.
+        - Do not use general knowledge to fill a gap in the search results. If the results do not explicitly establish the answer, say so.
 
         Search results:
         \(trimmed)
