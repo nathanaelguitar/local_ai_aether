@@ -55,9 +55,9 @@ struct ConversationListView: View {
                     }
                     .padding(.bottom, 12)
 
-                    // List
-                    ScrollView {
-                        LazyVStack(spacing: 12, pinnedViews: []) {
+                    // List (a real List so swipe-to-delete is the native gesture)
+                    List {
+                        Group {
                             if !pinned.isEmpty {
                                 SectionHeader(title: "Pinned", color: AetherColors.amber)
                                 ForEach(pinned) { conv in
@@ -77,10 +77,15 @@ struct ConversationListView: View {
                             if filtered.isEmpty {
                                 EmptyGrove(onNewChat: { showNewChat = true })
                             }
+                            Color.clear
+                                .frame(height: 96)
                         }
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 110)
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
                     }
+                    .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
                 }
 
                 VStack {
@@ -206,7 +211,6 @@ struct ConversationRow: View {
     }
 
     var body: some View {
-        Button(action: onTap) {
             HStack(spacing: 14) {
                 // Workspace icon
                 ZStack {
@@ -251,7 +255,8 @@ struct ConversationRow: View {
             .padding(14)
             .background(state.isDarkTheme ? AetherColors.warmGray800 : Color.white)
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        }
+            .contentShape(Rectangle())
+            .onTapGesture(perform: onTap)
         .contextMenu {
             Button(action: onPin) {
                 Label(isCurrentlyPinned ? "Unpin" : "Pin to Top", systemImage: isCurrentlyPinned ? "pin.slash" : "pin")
@@ -262,8 +267,12 @@ struct ConversationRow: View {
         }
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
             Button(role: .destructive, action: onDelete) {
-                Label("Delete", systemImage: "trash")
+                Label("Delete", systemImage: "trash.fill")
             }
+            Button(action: onPin) {
+                Label(isCurrentlyPinned ? "Unpin" : "Pin", systemImage: isCurrentlyPinned ? "pin.slash.fill" : "pin.fill")
+            }
+            .tint(AetherColors.amber)
         }
     }
 
