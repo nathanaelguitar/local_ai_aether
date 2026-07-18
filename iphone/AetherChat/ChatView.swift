@@ -41,6 +41,7 @@ struct ChatView: View {
                 text: $inputText,
                 attachments: $attachments,
                 selectedPhotoItem: $selectedPhotoItem,
+                webSearchEnabled: $state.webSearchEnabled,
                 isSending: isSending,
                 isDark: state.isDarkTheme,
                 focused: $inputFocused,
@@ -1589,6 +1590,7 @@ struct InputBar: View {
     @Binding var text: String
     @Binding var attachments: [ChatAttachment]
     @Binding var selectedPhotoItem: PhotosPickerItem?
+    @Binding var webSearchEnabled: Bool
     let isSending: Bool
     let isDark: Bool
     var focused: FocusState<Bool>.Binding
@@ -1596,6 +1598,9 @@ struct InputBar: View {
     let onCamera: () -> Void
     let onStop: () -> Void
     let onSend: () -> Void
+
+    @State private var showingPhotoPicker = false
+    @State private var showingAttachMenu = false
 
     var canSend: Bool {
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty
@@ -1605,25 +1610,76 @@ struct InputBar: View {
         isDark ? AetherColors.warmGray400 : AetherColors.warmGray500
     }
 
+    private func attachRow(icon: String, title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: icon)
+                    .font(.system(size: 16))
+                    .foregroundColor(AetherColors.oakMedium)
+                    .frame(width: 24)
+                Text(title)
+                    .font(.system(size: 15))
+                    .foregroundColor(.primary)
+                Spacer()
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func dismissMenuThen(_ action: @escaping () -> Void) {
+        showingAttachMenu = false
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            action()
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             AttachmentTray(attachments: $attachments)
 
             HStack(spacing: 2) {
-                Button(action: onFile) {
-                    InputAccessoryIcon(name: "paperclip", tint: accessoryTint)
+                Button {
+                    showingAttachMenu = true
+                } label: {
+                    InputAccessoryIcon(name: "plus", tint: accessoryTint)
                 }
                 .disabled(isSending)
-
-                PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
-                    InputAccessoryIcon(name: "photo.on.rectangle.angled", tint: accessoryTint)
+                .popover(isPresented: $showingAttachMenu, arrowEdge: .bottom) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        attachRow(icon: "paperclip", title: "Attach File") {
+                            dismissMenuThen(onFile)
+                        }
+                        attachRow(icon: "photo.on.rectangle.angled", title: "Photos") {
+                            dismissMenuThen { showingPhotoPicker = true }
+                        }
+                        attachRow(icon: "camera", title: "Camera") {
+                            dismissMenuThen(onCamera)
+                        }
+                        Divider()
+                            .padding(.vertical, 6)
+                        HStack(spacing: 10) {
+                            Image(systemName: "globe")
+                                .font(.system(size: 16))
+                                .foregroundColor(AetherColors.oakMedium)
+                                .frame(width: 24)
+                            Text("Search Web")
+                                .font(.system(size: 15))
+                            Spacer()
+                            Toggle("Search Web", isOn: $webSearchEnabled)
+                                .labelsHidden()
+                                .tint(AetherColors.forestMedium)
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                    }
+                    .padding(.vertical, 10)
+                    .frame(width: 250)
+                    .presentationCompactAdaptation(.popover)
                 }
-                .disabled(isSending)
-
-                Button(action: onCamera) {
-                    InputAccessoryIcon(name: "camera", tint: accessoryTint)
-                }
-                .disabled(isSending)
+                .photosPicker(isPresented: $showingPhotoPicker, selection: $selectedPhotoItem, matching: .images)
 
                 if focused.wrappedValue {
                     Button {

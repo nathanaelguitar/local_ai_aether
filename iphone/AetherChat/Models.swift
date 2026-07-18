@@ -304,6 +304,9 @@ class AppState: ObservableObject {
     private let locationService = AetherLocationService()
     private let networkMonitor = AetherNetworkMonitor()
     @Published var recentlyDeleted: [DeletedConversation] = []
+    @Published var webSearchEnabled: Bool = UserDefaults.standard.object(forKey: "webSearchEnabled") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(webSearchEnabled, forKey: "webSearchEnabled") }
+    }
     private var offlineWebNoticeShownConversationIDs: Set<UUID> = []
     private var activeInferenceCount = 0
 
@@ -601,10 +604,15 @@ class AppState: ObservableObject {
             generationStatusMessage = messageSnapshot.contains(where: { !$0.attachments.isEmpty })
                 ? "Reading attachments and the conversation"
                 : "Reading the conversation"
-            let candidateWebQuery = AetherWebSearchIntent.query(from: latestUserText, previousMessages: priorMessages)
-            let explicitWebQuery = AetherWebSearchIntent.explicitQuery(from: latestUserText, previousMessages: priorMessages)
-            let webQuery = forcedWebSearchQuery ?? explicitWebQuery
-            let shouldOfferSearch = forcedWebSearchQuery == nil
+            let candidateWebQuery = webSearchEnabled
+                ? AetherWebSearchIntent.query(from: latestUserText, previousMessages: priorMessages)
+                : nil
+            let explicitWebQuery = webSearchEnabled
+                ? AetherWebSearchIntent.explicitQuery(from: latestUserText, previousMessages: priorMessages)
+                : nil
+            let webQuery = webSearchEnabled ? (forcedWebSearchQuery ?? explicitWebQuery) : nil
+            let shouldOfferSearch = webSearchEnabled
+                && forcedWebSearchQuery == nil
                 && explicitWebQuery == nil
                 && candidateWebQuery != nil
             var webSearchContext: String?
