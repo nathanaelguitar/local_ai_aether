@@ -354,7 +354,7 @@ struct ChatView: View {
 
     private func reportIssue(_ body: String) {
         AetherBetaTelemetry.shared.record(.issueReported, conversationID: conversationId)
-        guard let url = CanopyFeedback.mailURL(subject: "CanopyChat Feedback", body: body) else {
+        guard let url = CanopyFeedback.mailURL(subject: "CanopyChat feedback — help improve the model", body: body) else {
             sharePayload = SharePayload(feedbackText: body)
             return
         }
@@ -1043,7 +1043,7 @@ struct SharePayload: Identifiable {
         self.text = feedbackText
         self.emailURL = Self.mailtoURL(
             to: CanopyFeedback.supportEmail,
-            subject: "CanopyChat Feedback",
+            subject: "CanopyChat feedback — help improve the model",
             body: feedbackText
         )
     }

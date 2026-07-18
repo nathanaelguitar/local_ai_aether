@@ -200,7 +200,7 @@ struct SettingsView: View {
     private func reportIssue() {
         let body = CanopyFeedback.appIssue()
         AetherBetaTelemetry.shared.record(.issueReported)
-        guard let url = CanopyFeedback.mailURL(subject: "CanopyChat Issue Report", body: body) else {
+        guard let url = CanopyFeedback.mailURL(subject: "CanopyChat issue report — help us improve", body: body) else {
             sharePayload = SharePayload(feedbackText: body)
             return
         }

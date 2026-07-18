@@ -167,8 +167,12 @@ enum CanopyFeedback {
     nonisolated static let supportEmail = "consulting.nathanael@gmail.com"
 
     static func modelFeedback(message: ChatMessage, conversation: Conversation?) -> String {
-        """
+        let cleanedResponse = plainText(message.content.trimmingCharacters(in: .whitespacesAndNewlines))
+        return """
         CanopyChat Model Feedback
+        =========================
+
+        Thanks for taking a moment to report this. Your feedback helps us improve the model and make CanopyChat more useful.
 
         Conversation: \(conversation?.title ?? "Unknown")
         Assistant: \(conversation?.persona.name ?? "Unknown")
@@ -178,17 +182,29 @@ enum CanopyFeedback {
         Device: \(UIDevice.current.model)
         iOS: \(UIDevice.current.systemVersion)
 
-        What went wrong?
+        WHAT WENT WRONG?
+        ----------------
+        Please tell us what was incorrect, confusing, incomplete, or unexpected.
+
+        WHAT WERE YOU EXPECTING?
+        -------------------------
+        If you can, describe the answer or behavior you wanted instead.
 
 
-        Model response:
-        \(message.content.trimmingCharacters(in: .whitespacesAndNewlines))
+        MODEL RESPONSE
+        --------------
+        \(cleanedResponse)
+
+        Thank you for helping us make CanopyChat better.
         """
     }
 
     static func appIssue(conversation: Conversation? = nil) -> String {
         """
         CanopyChat Issue Report
+        =======================
+
+        Thanks for helping us improve CanopyChat. The details below will help us understand and fix the problem.
 
         Conversation: \(conversation?.title ?? "Not provided")
         Timestamp: \(ISO8601DateFormatter().string(from: Date()))
@@ -196,17 +212,33 @@ enum CanopyFeedback {
         Device: \(UIDevice.current.model)
         iOS: \(UIDevice.current.systemVersion)
 
-        What happened?
+        WHAT HAPPENED?
+        --------------
+        Please describe what went wrong.
 
 
-        What did you expect?
+        WHAT DID YOU EXPECT?
+        --------------------
+        Please describe the behavior you expected.
 
 
-        Steps to reproduce:
+        STEPS TO REPRODUCE
+        ------------------
         1.
         2.
         3.
+
+        Thank you for helping us make CanopyChat better.
         """
+    }
+
+    private static func plainText(_ text: String) -> String {
+        text
+            .replacingOccurrences(of: #"\*\*(.*?)\*\*"#, with: "$1", options: .regularExpression)
+            .replacingOccurrences(of: #"__(.*?)__"#, with: "$1", options: .regularExpression)
+            .replacingOccurrences(of: #"`([^`]+)`"#, with: "$1", options: .regularExpression)
+            .replacingOccurrences(of: #"\[([^\]]+)\]\([^\)]+\)"#, with: "$1", options: .regularExpression)
+            .replacingOccurrences(of: #"^\s{0,3}#{1,6}\s*"#, with: "", options: [.regularExpression, .caseInsensitive])
     }
 
     static func mailURL(subject: String, body: String) -> URL? {
