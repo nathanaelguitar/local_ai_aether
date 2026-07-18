@@ -276,6 +276,16 @@ struct ChatView: View {
                     metadata: ["rating": rating.rawValue]
                 )
             },
+            onShareFailure: {
+                let failure = CanopyFeedback.modelFeedback(message: msg, conversation: conversation)
+                AetherBetaTelemetry.shared.record(
+                    .issueReported,
+                    conversationID: conversationId,
+                    messageID: msg.id,
+                    metadata: ["source": "thumbs_down_share"]
+                )
+                sharePayload = SharePayload(feedbackText: failure)
+            },
             onResend: resendAction,
             onEdit: editAction
         )
@@ -545,11 +555,14 @@ struct MessageBubble: View {
     let onRegenerate: () -> Void
     let onFeedback: () -> Void
     let onRating: (AetherFeedbackRating) -> Void
+    let onShareFailure: () -> Void
     let onResend: (() -> Void)?
     let onEdit: (() -> Void)?
     @State private var copiedMessage = false
     @State private var sharePayload: SharePayload?
     @State private var speechState: SpeechPlaybackState = .stopped
+    @State private var selectedRating: AetherFeedbackRating?
+    @State private var showingNegativeFeedback = false
     private let speech = AetherSpeechController.shared
 
     var isUser: Bool { message.role == .user }
@@ -606,8 +619,11 @@ struct MessageBubble: View {
                             .buttonStyle(.plain)
                         }
 
-                        Button { onRating(.positive) } label: {
-                            Image(systemName: "hand.thumbsup")
+                        Button {
+                            selectedRating = .positive
+                            onRating(.positive)
+                        } label: {
+                            Image(systemName: selectedRating == .positive ? "hand.thumbsup.fill" : "hand.thumbsup")
                                 .font(.system(size: 12, weight: .semibold))
                                 .foregroundColor(AetherColors.oakMedium)
                                 .frame(width: 28, height: 28)
@@ -617,8 +633,12 @@ struct MessageBubble: View {
                         .buttonStyle(.plain)
                         .accessibilityLabel("Helpful response")
 
-                        Button { onRating(.negative) } label: {
-                            Image(systemName: "hand.thumbsdown")
+                        Button {
+                            selectedRating = .negative
+                            onRating(.negative)
+                            showingNegativeFeedback = true
+                        } label: {
+                            Image(systemName: selectedRating == .negative ? "hand.thumbsdown.fill" : "hand.thumbsdown")
                                 .font(.system(size: 12, weight: .semibold))
                                 .foregroundColor(AetherColors.oakMedium)
                                 .frame(width: 28, height: 28)
@@ -696,6 +716,17 @@ struct MessageBubble: View {
         .padding(.horizontal, 16)
         .sheet(item: $sharePayload) { payload in
             ActivityView(items: payload.activityItems)
+        }
+        .confirmationDialog(
+            "Help improve CanopyChat",
+            isPresented: $showingNegativeFeedback,
+            titleVisibility: .visible
+        ) {
+            Button("Give feedback") { onFeedback() }
+            Button("Share failure") { onShareFailure() }
+            Button("Not now", role: .cancel) {}
+        } message: {
+            Text("We work hard to provide the best service to our customers. Tell us what went wrong so we can improve the model.")
         }
         .onDisappear {
             if speechState != .stopped {

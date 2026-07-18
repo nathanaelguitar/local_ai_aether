@@ -172,7 +172,7 @@ enum CanopyFeedback {
         CanopyChat Model Feedback
         =========================
 
-        Thanks for taking a moment to report this. Your feedback helps us improve the model and make CanopyChat more useful.
+        Thanks for taking a moment to report this. Your feedback helps us improve the model and make CanopyChat more useful. We work hard to provide the best service to our customers.
 
         Conversation: \(conversation?.title ?? "Unknown")
         Assistant: \(conversation?.persona.name ?? "Unknown")
