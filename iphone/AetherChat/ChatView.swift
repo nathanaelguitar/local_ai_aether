@@ -278,13 +278,7 @@ struct ChatView: View {
             },
             onShareFailure: {
                 let failure = CanopyFeedback.modelFeedback(message: msg, conversation: conversation)
-                AetherBetaTelemetry.shared.record(
-                    .issueReported,
-                    conversationID: conversationId,
-                    messageID: msg.id,
-                    metadata: ["source": "thumbs_down_share"]
-                )
-                sharePayload = SharePayload(feedbackText: failure)
+                reportIssue(failure)
             },
             onResend: resendAction,
             onEdit: editAction

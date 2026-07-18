@@ -170,7 +170,6 @@ enum CanopyFeedback {
         let cleanedResponse = plainText(message.content.trimmingCharacters(in: .whitespacesAndNewlines))
         return """
         CanopyChat Model Feedback
-        =========================
 
         Thanks for taking a moment to report this. Your feedback helps us improve the model and make CanopyChat more useful. We work hard to provide the best service to our customers.
 
@@ -183,16 +182,13 @@ enum CanopyFeedback {
         iOS: \(UIDevice.current.systemVersion)
 
         WHAT WENT WRONG?
-        ----------------
         Please tell us what was incorrect, confusing, incomplete, or unexpected.
 
         WHAT WERE YOU EXPECTING?
-        -------------------------
         If you can, describe the answer or behavior you wanted instead.
 
 
         MODEL RESPONSE
-        --------------
         \(cleanedResponse)
 
         Thank you for helping us make CanopyChat better.
@@ -202,7 +198,6 @@ enum CanopyFeedback {
     static func appIssue(conversation: Conversation? = nil) -> String {
         """
         CanopyChat Issue Report
-        =======================
 
         Thanks for helping us improve CanopyChat. The details below will help us understand and fix the problem.
 
@@ -213,17 +208,14 @@ enum CanopyFeedback {
         iOS: \(UIDevice.current.systemVersion)
 
         WHAT HAPPENED?
-        --------------
         Please describe what went wrong.
 
 
         WHAT DID YOU EXPECT?
-        --------------------
         Please describe the behavior you expected.
 
 
         STEPS TO REPRODUCE
-        ------------------
         1.
         2.
         3.
