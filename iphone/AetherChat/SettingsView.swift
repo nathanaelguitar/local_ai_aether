@@ -6,6 +6,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) var dismiss
     @State private var showingSystemPreferences = false
     @State private var sharePayload: SharePayload?
+    @State private var betaTelemetryEnabled = AetherBetaTelemetry.shared.isEnabled
 
     var body: some View {
         NavigationStack {
@@ -105,7 +106,7 @@ struct SettingsView: View {
                         // Feedback
                         SettingsSection(title: "Feedback") {
                             Button {
-                                sharePayload = SharePayload(feedbackText: CanopyFeedback.appIssue())
+                                reportIssue()
                             } label: {
                                 SettingsRowLabel(
                                     icon: "exclamationmark.bubble",
@@ -116,6 +117,28 @@ struct SettingsView: View {
                             .buttonStyle(.plain)
                             .background(Color(UIColor.secondarySystemBackground))
                             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        }
+
+                        if AetherBuildChannel.isBeta {
+                            SettingsSection(title: "Beta Program") {
+                                VStack(spacing: 0) {
+                                    Toggle(isOn: $betaTelemetryEnabled) {
+                                        SettingsRowLabel(
+                                            icon: "chart.bar.xaxis",
+                                            title: "Share beta diagnostics",
+                                            subtitle: "Prompts, responses, ratings, and web-search choices"
+                                        )
+                                    }
+                                    .tint(AetherColors.oakMedium)
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 12)
+                                    .onChange(of: betaTelemetryEnabled) { _, enabled in
+                                        AetherBetaTelemetry.shared.setEnabled(enabled)
+                                    }
+                                }
+                                .background(Color(UIColor.secondarySystemBackground))
+                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            }
                         }
 
                         // About
@@ -170,6 +193,23 @@ struct SettingsView: View {
         .onAppear {
             state.inferenceProvider = .onDevice
             state.selectedModel = AetherModelCatalog.aetherV1DisplayName
+            betaTelemetryEnabled = AetherBetaTelemetry.shared.isEnabled
+        }
+    }
+
+    private func reportIssue() {
+        let body = CanopyFeedback.appIssue()
+        AetherBetaTelemetry.shared.record(.issueReported)
+        guard let url = CanopyFeedback.mailURL(subject: "CanopyChat Issue Report", body: body) else {
+            sharePayload = SharePayload(feedbackText: body)
+            return
+        }
+        UIApplication.shared.open(url) { opened in
+            if !opened {
+                Task { @MainActor in
+                    sharePayload = SharePayload(feedbackText: body)
+                }
+            }
         }
     }
 }

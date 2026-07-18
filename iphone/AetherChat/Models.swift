@@ -500,6 +500,13 @@ class AppState: ObservableObject {
 
     func searchWebAndRegenerate(in id: UUID) async {
         guard let suggestion = webSearchSuggestion, suggestion.conversationID == id else { return }
+        let latestUserText = conversations.first(where: { $0.id == id })?.messages.last(where: { $0.role == .user })?.content
+        AetherBetaTelemetry.shared.record(
+            .searchChosen,
+            conversationID: id,
+            prompt: latestUserText,
+            metadata: ["query": suggestion.query]
+        )
         webSearchSuggestion = nil
         await regenerateLastResponse(in: id, forcedWebSearchQuery: suggestion.query)
     }
@@ -514,6 +521,7 @@ class AppState: ObservableObject {
         forcedWebSearchQuery: String? = nil
     ) async {
         webSearchSuggestion = nil
+        let inferenceStartedAt = Date()
         beginInferenceActivity()
         let task = AetherBackgroundTask.begin(name: "Aether V1 inference") { [weak self] in
             Task { @MainActor in
@@ -539,6 +547,8 @@ class AppState: ObservableObject {
                 && candidateWebQuery != nil
             var webSearchContext: String?
             var webSourcesMarkdown: String?
+            var webSearchSourceCount = 0
+            var webSearchSucceeded = false
             if let webQuery {
                 if networkMonitor.hasReceivedStatus && !networkMonitor.isConnected {
                     webSearchContext = offlineWebContext(for: webQuery, conversationID: id)
@@ -550,6 +560,8 @@ class AppState: ObservableObject {
                         let searchResult = try await webSearch.search(query: localizedQuery)
                         webSearchContext = searchResult.context
                         webSourcesMarkdown = searchResult.sourcesMarkdown
+                        webSearchSourceCount = searchResult.citations.count
+                        webSearchSucceeded = true
                     } catch {
                         webSearchContext = offlineWebContext(for: webQuery, conversationID: id)
                         webSourcesMarkdown = nil
@@ -599,11 +611,32 @@ class AppState: ObservableObject {
                let candidateWebQuery,
                !networkMonitor.hasReceivedStatus || networkMonitor.isConnected {
                 webSearchSuggestion = AetherWebSearchSuggestion(conversationID: id, query: candidateWebQuery)
+                AetherBetaTelemetry.shared.record(
+                    .searchSuggested,
+                    conversationID: id,
+                    prompt: latestUserText,
+                    metadata: ["query": candidateWebQuery]
+                )
             }
             modelLoadingMessage = nil
             generationStatusMessage = nil
             streamingPreview = nil
             appendAssistantMessage(to: id, content: response)
+            let responseMessageID = conversations.first(where: { $0.id == id })?.messages.last(where: { $0.role == .assistant })?.id
+            AetherBetaTelemetry.shared.record(
+                .responseGenerated,
+                conversationID: id,
+                messageID: responseMessageID,
+                prompt: latestUserText,
+                response: response,
+                metadata: [
+                    "latency_ms": String(Int(Date().timeIntervalSince(inferenceStartedAt) * 1_000)),
+                    "web_search_requested": String(webQuery != nil),
+                    "web_search_succeeded": String(webSearchSucceeded),
+                    "web_search_source_count": String(webSearchSourceCount),
+                    "search_suggested": String(shouldOfferSearch)
+                ]
+            )
             notifyIfNeeded(conversationTitle: conversations.first(where: { $0.id == id })?.title ?? "Canopy", response: response)
         } catch is CancellationError {
             modelLoadingMessage = nil
@@ -896,14 +929,16 @@ class AppState: ObservableObject {
         UserDefaults.standard.set(data, forKey: "customWorkspaces")
     }
 
-    private func appendAssistantMessage(to id: UUID, content: String) {
-        guard let idx = conversations.firstIndex(where: { $0.id == id }) else { return }
+    @discardableResult
+    private func appendAssistantMessage(to id: UUID, content: String) -> UUID? {
+        guard let idx = conversations.firstIndex(where: { $0.id == id }) else { return nil }
         let reply = ChatMessage(role: .assistant, content: content)
         conversations[idx].messages.append(reply)
         conversations[idx].previewText = reply.content
         conversations[idx].updatedAt = Date()
         refreshMemorySummary(at: idx)
         persistConversation(at: idx)
+        return reply.id
     }
 
     private func inferenceErrorDescription(_ error: Error) -> String {

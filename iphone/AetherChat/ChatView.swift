@@ -177,6 +177,11 @@ struct ChatView: View {
                                        isDark: state.isDarkTheme)
                     }
                     ForEach(conversation?.messages ?? []) { msg in
+                        if msg.id == conversation?.messages.last?.id && msg.role == .assistant {
+                            Color.clear
+                                .frame(height: 56)
+                                .id("latest-response-start")
+                        }
                         messageBubble(for: msg)
                             .id(msg.id)
                     }
@@ -205,20 +210,14 @@ struct ChatView: View {
             .scrollDismissesKeyboard(.interactively)
             .contentShape(Rectangle())
             .onTapGesture { inputFocused = false }
-            .onChange(of: conversation?.messages.count) {
-                if let last = conversation?.messages.last {
-                    withAnimation {
-                        proxy.scrollTo(last.id, anchor: last.role == .assistant ? .top : .bottom)
-                    }
-                }
+                    .onChange(of: conversation?.messages.count) {
+                scrollToLatestMessage(using: proxy)
+            }
+            .onChange(of: conversation?.messages.last?.id) {
+                scrollToLatestMessage(using: proxy)
             }
             .onChange(of: isSending) {
                 if isSending { withAnimation { proxy.scrollTo("typing", anchor: .bottom) } }
-            }
-            .onChange(of: state.streamingPreview) {
-                if isSending && state.streamingPreview != nil {
-                    proxy.scrollTo("typing", anchor: .bottom)
-                }
             }
             .onChange(of: state.webSearchSuggestion?.id) {
                 if state.webSearchSuggestion != nil {
@@ -230,21 +229,54 @@ struct ChatView: View {
         }
     }
 
+    private func scrollToLatestMessage(using proxy: ScrollViewProxy) {
+        guard let last = conversation?.messages.last else { return }
+        DispatchQueue.main.async {
+            withAnimation {
+                if last.role == .assistant {
+                    proxy.scrollTo("latest-response-start", anchor: .top)
+                } else {
+                    proxy.scrollTo(last.id, anchor: .bottom)
+                }
+            }
+        }
+    }
+
     @ViewBuilder
     private func messageBubble(for msg: ChatMessage) -> some View {
         let editAction: (() -> Void)? = msg.role == .user ? {
             editingPrompt = PromptEditDraft(messageID: msg.id, text: msg.content)
+        } : nil
+        let resendAction: (() -> Void)? = msg.role == .user ? {
+            resend(message: msg)
         } : nil
 
         MessageBubble(
             message: msg,
             isDark: state.isDarkTheme,
             fontScale: state.messageFontScale,
-            canRegenerate: false,
-            onRegenerate: { regenerate() },
-            onFeedback: {
-                sharePayload = SharePayload(feedbackText: CanopyFeedback.modelFeedback(message: msg, conversation: conversation))
+            canRegenerate: !isSending && msg.id == latestAssistantMessageId,
+            onRegenerate: {
+                AetherBetaTelemetry.shared.record(
+                    .responseRegenerated,
+                    conversationID: conversationId,
+                    messageID: msg.id
+                )
+                regenerate()
             },
+            onFeedback: {
+                reportIssue(CanopyFeedback.modelFeedback(message: msg, conversation: conversation))
+            },
+            onRating: { rating in
+                AetherBetaTelemetry.shared.record(
+                    .responseRated,
+                    conversationID: conversationId,
+                    messageID: msg.id,
+                    response: msg.content,
+                    metadata: ["rating": rating.rawValue]
+                )
+            },
+            onResend: resendAction,
             onEdit: editAction
         )
     }
@@ -297,6 +329,40 @@ struct ChatView: View {
             if !Task.isCancelled {
                 isSending = false
                 sendTask = nil
+            }
+        }
+    }
+
+    func resend(message: ChatMessage) {
+        guard !isSending else { return }
+        inputFocused = false
+        isSending = true
+        AetherBetaTelemetry.shared.record(
+            .messageResent,
+            conversationID: conversationId,
+            messageID: message.id,
+            prompt: message.content
+        )
+        sendTask = Task {
+            await state.editUserMessage(in: conversationId, messageID: message.id, text: message.content)
+            if !Task.isCancelled {
+                isSending = false
+                sendTask = nil
+            }
+        }
+    }
+
+    private func reportIssue(_ body: String) {
+        AetherBetaTelemetry.shared.record(.issueReported, conversationID: conversationId)
+        guard let url = CanopyFeedback.mailURL(subject: "CanopyChat Feedback", body: body) else {
+            sharePayload = SharePayload(feedbackText: body)
+            return
+        }
+        UIApplication.shared.open(url) { opened in
+            if !opened {
+                Task { @MainActor in
+                    sharePayload = SharePayload(feedbackText: body)
+                }
             }
         }
     }
@@ -478,6 +544,8 @@ struct MessageBubble: View {
     let canRegenerate: Bool
     let onRegenerate: () -> Void
     let onFeedback: () -> Void
+    let onRating: (AetherFeedbackRating) -> Void
+    let onResend: (() -> Void)?
     let onEdit: (() -> Void)?
     @State private var copiedMessage = false
     @State private var sharePayload: SharePayload?
@@ -538,6 +606,28 @@ struct MessageBubble: View {
                             .buttonStyle(.plain)
                         }
 
+                        Button { onRating(.positive) } label: {
+                            Image(systemName: "hand.thumbsup")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(AetherColors.oakMedium)
+                                .frame(width: 28, height: 28)
+                                .background((isDark ? AetherColors.warmGray800 : Color.white).opacity(0.82))
+                                .clipShape(Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Helpful response")
+
+                        Button { onRating(.negative) } label: {
+                            Image(systemName: "hand.thumbsdown")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(AetherColors.oakMedium)
+                                .frame(width: 28, height: 28)
+                                .background((isDark ? AetherColors.warmGray800 : Color.white).opacity(0.82))
+                                .clipShape(Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Unhelpful response")
+
                         Button(action: onFeedback) {
                             Image(systemName: "exclamationmark.bubble")
                                 .font(.system(size: 12, weight: .semibold))
@@ -581,6 +671,19 @@ struct MessageBubble: View {
                                     .clipShape(Circle())
                             }
                             .buttonStyle(.plain)
+                        }
+
+                        if let onResend {
+                            Button(action: onResend) {
+                                Image(systemName: "arrow.clockwise")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundColor(AetherColors.oakMedium)
+                                    .frame(width: 28, height: 28)
+                                    .background((isDark ? AetherColors.warmGray800 : Color.white).opacity(0.82))
+                                    .clipShape(Circle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Resend message")
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .trailing)

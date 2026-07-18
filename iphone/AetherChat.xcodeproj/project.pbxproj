@@ -411,6 +411,8 @@
 		25D45F92D9A0ACC403877CDE /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				AETHER_BUILD_CHANNEL = production;
+				AETHER_BETA_TELEMETRY_ENDPOINT = "";
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
@@ -437,6 +439,8 @@
 		2812862BF966DE3764C148B6 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				AETHER_BUILD_CHANNEL = beta;
+				AETHER_BETA_TELEMETRY_ENDPOINT = "";
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
