@@ -253,6 +253,11 @@ class AppState(application: Application) : AndroidViewModel(application) {
             _generationStatus.value = "Composing a response"
             var response = generateReply(persona, snapshot, webSearchContext, memoryContext, customSystemPrompt.value)
 
+            /*
+             Anti-doom-loop recovery is intentionally disabled while the model-level
+             tuning is being evaluated. Keep this block intact for TestFlight/beta
+             reactivation if the model still produces a loop.
+
             if (LoopDetector.isLooping(response, snapshot)) {
                 _generationStatus.value = "Redirecting repeated response"
                 response = generateReply(
@@ -263,6 +268,7 @@ class AppState(application: Application) : AndroidViewModel(application) {
                     response = LoopDetector.fallbackRedirectResponse(latestUserText)
                 }
             }
+            */
 
             webSourcesMarkdown?.let { sources ->
                 val lc = response.lowercase()

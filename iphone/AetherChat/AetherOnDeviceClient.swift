@@ -28,7 +28,8 @@ actor AetherOnDeviceClient {
         webSearchContext: String? = nil,
         memoryContext: String? = nil,
         customSystemPrompt: String = "",
-        status: StatusHandler? = nil
+        status: StatusHandler? = nil,
+        onToken: (@Sendable (String) -> Void)? = nil
     ) async throws -> String {
         #if canImport(LlamaSwift)
         let modelFiles = try await AetherModelStore.localAetherV1Files(status: status)
@@ -61,7 +62,8 @@ actor AetherOnDeviceClient {
                     prompt: prompt,
                     attachments: promptAttachments,
                     modelFiles: modelFiles,
-                    status: status
+                    status: status,
+                    onToken: onToken
                 )
             } catch AetherOnDeviceError.tokenizationFailed where !isLastLevel {
                 // The estimate was too optimistic; degrade further and try again.
@@ -80,7 +82,8 @@ actor AetherOnDeviceClient {
         prompt: String,
         attachments: [ChatAttachment],
         modelFiles: AetherModelStore.AetherV1Files,
-        status: StatusHandler?
+        status: StatusHandler?,
+        onToken: (@Sendable (String) -> Void)? = nil
     ) async throws -> String {
         for attempt in 0...1 {
             do {
@@ -89,7 +92,7 @@ actor AetherOnDeviceClient {
                 let engine = try loadEngine(modelURL: modelFiles.modelURL, mmprojURL: modelFiles.mmprojURL)
                 try Task.checkCancellation()
                 await status?(nil)
-                return try engine.generate(prompt: prompt, attachments: attachments)
+                return try engine.generate(prompt: prompt, attachments: attachments, onToken: onToken)
             } catch {
                 resetEngineIfNeeded(after: error)
                 guard attempt == 0, Self.canRetry(after: error), !Task.isCancelled else {
@@ -480,7 +483,9 @@ final class AetherLlamaEngine {
         llama_backend_free()
     }
 
-    func generate(prompt: String, attachments: [ChatAttachment]) throws -> String {
+    typealias TokenHandler = @Sendable (String) -> Void
+
+    func generate(prompt: String, attachments: [ChatAttachment], onToken: TokenHandler? = nil) throws -> String {
         llama_memory_clear(llama_get_memory(context), true)
         if attachments.isEmpty {
             try Task.checkCancellation()
@@ -494,14 +499,14 @@ final class AetherLlamaEngine {
             defer { llama_batch_free(batch) }
 
             try decodePrompt(tokens: promptTokens, batch: &batch)
-            return try generateCompletion(startPosition: Int32(promptTokens.count), previousToken: promptTokens.last ?? llama_vocab_bos(vocab))
+            return try generateCompletion(startPosition: Int32(promptTokens.count), previousToken: promptTokens.last ?? llama_vocab_bos(vocab), onToken: onToken)
         }
 
         let startPosition = try decodeMultimodalPrompt(prompt: prompt, attachments: attachments)
-        return try generateCompletion(startPosition: startPosition, previousToken: llama_vocab_bos(vocab))
+        return try generateCompletion(startPosition: startPosition, previousToken: llama_vocab_bos(vocab), onToken: onToken)
     }
 
-    private func generateCompletion(startPosition: Int32, previousToken: llama_token) throws -> String {
+    private func generateCompletion(startPosition: Int32, previousToken: llama_token, onToken: TokenHandler? = nil) throws -> String {
         // llama_token_to_piece returns UTF-8 bytes, and a Unicode scalar can be
         // split across adjacent token pieces. Keep the bytes intact until the
         // full completion is available; decoding each piece independently turns
@@ -529,6 +534,12 @@ final class AetherLlamaEngine {
                 generatedBytes.removeSubrange(markerStart...)
                 break
             }
+            if let onToken {
+                let preview = Self.streamPreview(from: generatedBytes)
+                if !preview.isEmpty {
+                    onToken(preview)
+                }
+            }
 
             try decode(tokens: [next], batch: &batch, startPosition: position, logitsForLastToken: true)
             position += 1
@@ -540,6 +551,28 @@ final class AetherLlamaEngine {
             throw AetherOnDeviceError.emptyResponse
         }
         return cleaned
+    }
+
+    /// Display-safe text for mid-generation streaming: hides a partially emitted
+    /// control marker at the tail, a Unicode scalar split across token pieces,
+    /// and any leaked think block.
+    private static func streamPreview(from bytes: [UInt8]) -> String {
+        var text = String(decoding: bytes, as: UTF8.self)
+        while text.hasSuffix("\u{FFFD}") {
+            text.removeLast()
+        }
+        if let tail = text.lastIndex(of: "<"), text.distance(from: tail, to: text.endIndex) <= 10 {
+            let suffix = String(text[tail...])
+            if ["<|im_end|>", "<think>", "</think>"].contains(where: { $0.hasPrefix(suffix) }) {
+                text.removeSubrange(tail...)
+            }
+        }
+        if let think = text.range(of: "</think>") {
+            text = String(text[think.upperBound...])
+        } else if let think = text.range(of: "<think>") {
+            text.removeSubrange(think.lowerBound..<text.endIndex)
+        }
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func decodeMultimodalPrompt(prompt: String, attachments: [ChatAttachment]) throws -> Int32 {

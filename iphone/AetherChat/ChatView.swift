@@ -180,9 +180,24 @@ struct ChatView: View {
                         messageBubble(for: msg)
                             .id(msg.id)
                     }
+                    if let suggestion = state.webSearchSuggestion,
+                       suggestion.conversationID == conversationId,
+                       !isSending {
+                        WebSearchSuggestionView(
+                            query: suggestion.query,
+                            isDark: state.isDarkTheme,
+                            onSearch: { searchWeb() }
+                        )
+                        .id("web-search-suggestion")
+                    }
                     if isSending && state.modelLoadingMessage == nil {
-                        TypingIndicator(message: state.generationStatusMessage, isDark: state.isDarkTheme)
-                            .id("typing")
+                        if let preview = state.streamingPreview, !preview.isEmpty {
+                            StreamingBubble(text: preview, isDark: state.isDarkTheme, fontScale: state.messageFontScale)
+                                .id("typing")
+                        } else {
+                            TypingIndicator(message: state.generationStatusMessage, isDark: state.isDarkTheme)
+                                .id("typing")
+                        }
                     }
                 }
                 .padding(.vertical, 16)
@@ -199,6 +214,18 @@ struct ChatView: View {
             }
             .onChange(of: isSending) {
                 if isSending { withAnimation { proxy.scrollTo("typing", anchor: .bottom) } }
+            }
+            .onChange(of: state.streamingPreview) {
+                if isSending && state.streamingPreview != nil {
+                    proxy.scrollTo("typing", anchor: .bottom)
+                }
+            }
+            .onChange(of: state.webSearchSuggestion?.id) {
+                if state.webSearchSuggestion != nil {
+                    withAnimation {
+                        proxy.scrollTo("web-search-suggestion", anchor: .bottom)
+                    }
+                }
             }
         }
     }
@@ -245,6 +272,7 @@ struct ChatView: View {
         isSending = false
         state.modelLoadingMessage = nil
         state.generationStatusMessage = nil
+        state.streamingPreview = nil
     }
 
     func regenerate() {
@@ -253,6 +281,19 @@ struct ChatView: View {
         isSending = true
         sendTask = Task {
             await state.regenerateLastResponse(in: conversationId)
+            if !Task.isCancelled {
+                isSending = false
+                sendTask = nil
+            }
+        }
+    }
+
+    func searchWeb() {
+        guard !isSending else { return }
+        inputFocused = false
+        isSending = true
+        sendTask = Task {
+            await state.searchWebAndRegenerate(in: conversationId)
             if !Task.isCancelled {
                 isSending = false
                 sendTask = nil
@@ -292,8 +333,6 @@ struct ChatView: View {
 struct ModelLoadingOverlay: View {
     let message: String
     let isDark: Bool
-    @State private var rotation = 0.0
-    @State private var pulse = false
 
     var body: some View {
         ZStack {
@@ -303,28 +342,7 @@ struct ModelLoadingOverlay: View {
                 .ignoresSafeArea()
 
             VStack(spacing: 18) {
-                ZStack {
-                    Circle()
-                        .stroke(AetherColors.oakPale.opacity(0.28), lineWidth: 14)
-                        .frame(width: 116, height: 116)
-
-                    Circle()
-                        .trim(from: 0.08, to: 0.72)
-                        .stroke(
-                            AngularGradient(
-                                colors: [AetherColors.oakMedium, AetherColors.copper, AetherColors.amber, AetherColors.oakMedium],
-                                center: .center
-                            ),
-                            style: StrokeStyle(lineWidth: 14, lineCap: .round)
-                        )
-                        .frame(width: 116, height: 116)
-                        .rotationEffect(.degrees(rotation))
-
-                    Image(systemName: "tree.fill")
-                        .font(.system(size: 34, weight: .semibold))
-                        .foregroundColor(AetherColors.oakMedium)
-                        .scaleEffect(pulse ? 1.08 : 0.94)
-                }
+                WoodlandWalkScene(isDark: isDark)
 
                 VStack(spacing: 8) {
                     Text("Rooting CanopyChat")
@@ -354,13 +372,101 @@ struct ModelLoadingOverlay: View {
                     .stroke(AetherColors.oakPale.opacity(0.35), lineWidth: 1)
             )
         }
-        .onAppear {
-            withAnimation(.linear(duration: 1.15).repeatForever(autoreverses: false)) {
-                rotation = 360
+    }
+}
+
+/// A little woodland sprout endlessly walking toward a tree while the model loads.
+struct WoodlandWalkScene: View {
+    let isDark: Bool
+
+    private static let cycleDuration = 7.0
+    private static let walkPortion = 0.78
+    private static let startX = -104.0
+    private static let treeX = 88.0
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 40.0)) { timeline in
+            let time = timeline.date.timeIntervalSinceReferenceDate
+            let cycle = time.truncatingRemainder(dividingBy: Self.cycleDuration) / Self.cycleDuration
+            let walking = cycle < Self.walkPortion
+            let walkProgress = min(cycle / Self.walkPortion, 1.0)
+            let walkerX = Self.startX + (Self.treeX - 34 - Self.startX) * walkProgress
+            let celebrateT = walking ? 0 : (cycle - Self.walkPortion) / (1 - Self.walkPortion)
+
+            ZStack {
+                Capsule()
+                    .fill(AetherColors.oakPale.opacity(isDark ? 0.35 : 0.6))
+                    .frame(width: 236, height: 3)
+                    .offset(y: 40)
+
+                Image(systemName: "tree.fill")
+                    .font(.system(size: 46))
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [AetherColors.forestMedium, AetherColors.forestMedium.opacity(0.75)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .rotationEffect(.degrees(sin(time * 1.1) * 1.6), anchor: .bottom)
+                    .offset(x: Self.treeX, y: 18)
+
+                Image(systemName: "leaf.fill")
+                    .font(.system(size: 11))
+                    .foregroundColor(AetherColors.forestMedium.opacity(0.85))
+                    .offset(
+                        x: Self.treeX - 18 + sin(celebrateT * .pi * 2) * 8,
+                        y: 10 - celebrateT * 34
+                    )
+                    .opacity(walking ? 0 : sin(celebrateT * .pi))
+
+                walker(time: time, walking: walking, celebrateT: celebrateT)
+                    .offset(
+                        x: walkerX,
+                        y: 26 + (walking
+                            ? -abs(sin(time * 7)) * 3
+                            : -abs(sin(celebrateT * .pi * 2)) * 8)
+                    )
             }
-            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
-                pulse = true
-            }
+            .frame(width: 240, height: 96)
+        }
+    }
+
+    private func walker(time: TimeInterval, walking: Bool, celebrateT: Double) -> some View {
+        let legSwing = walking ? sin(time * 9) * 24 : 0
+
+        return ZStack {
+            Capsule()
+                .fill(AetherColors.oakMedium)
+                .frame(width: 3.5, height: 10)
+                .rotationEffect(.degrees(legSwing), anchor: .top)
+                .offset(x: -3, y: 12)
+            Capsule()
+                .fill(AetherColors.oakMedium)
+                .frame(width: 3.5, height: 10)
+                .rotationEffect(.degrees(-legSwing), anchor: .top)
+                .offset(x: 3, y: 12)
+
+            Circle()
+                .fill(
+                    LinearGradient(
+                        colors: [AetherColors.amber, AetherColors.copper],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .frame(width: 22, height: 22)
+
+            Circle()
+                .fill(Color.white)
+                .frame(width: 3.5, height: 3.5)
+                .offset(x: 5, y: -3)
+
+            Image(systemName: "leaf.fill")
+                .font(.system(size: 9))
+                .foregroundColor(AetherColors.forestMedium)
+                .rotationEffect(.degrees(-35 + (walking ? sin(time * 7) * 6 : celebrateT * 20)))
+                .offset(x: 3, y: -13)
         }
     }
 }
@@ -1335,6 +1441,19 @@ struct CameraCaptureView: UIViewControllerRepresentable {
     }
 }
 
+private struct InputAccessoryIcon: View {
+    let name: String
+    let tint: Color
+
+    var body: some View {
+        Image(systemName: name)
+            .font(.system(size: 17, weight: .medium))
+            .foregroundColor(tint)
+            .frame(width: 32, height: 44)
+            .contentShape(Rectangle())
+    }
+}
+
 struct InputBar: View {
     @Binding var text: String
     @Binding var attachments: [ChatAttachment]
@@ -1351,16 +1470,8 @@ struct InputBar: View {
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty
     }
 
-    nonisolated private var accessoryTint: Color {
+    private var accessoryTint: Color {
         isDark ? AetherColors.warmGray400 : AetherColors.warmGray500
-    }
-
-    nonisolated private func accessoryIcon(_ name: String) -> some View {
-        Image(systemName: name)
-            .font(.system(size: 17, weight: .medium))
-            .foregroundColor(accessoryTint)
-            .frame(width: 32, height: 44)
-            .contentShape(Rectangle())
     }
 
     var body: some View {
@@ -1369,17 +1480,17 @@ struct InputBar: View {
 
             HStack(spacing: 2) {
                 Button(action: onFile) {
-                    accessoryIcon("paperclip")
+                    InputAccessoryIcon(name: "paperclip", tint: accessoryTint)
                 }
                 .disabled(isSending)
 
                 PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
-                    accessoryIcon("photo.on.rectangle.angled")
+                    InputAccessoryIcon(name: "photo.on.rectangle.angled", tint: accessoryTint)
                 }
                 .disabled(isSending)
 
                 Button(action: onCamera) {
-                    accessoryIcon("camera")
+                    InputAccessoryIcon(name: "camera", tint: accessoryTint)
                 }
                 .disabled(isSending)
 
@@ -1387,7 +1498,7 @@ struct InputBar: View {
                     Button {
                         focused.wrappedValue = false
                     } label: {
-                        accessoryIcon("keyboard.chevron.compact.down")
+                        InputAccessoryIcon(name: "keyboard.chevron.compact.down", tint: accessoryTint)
                     }
                     .transition(.move(edge: .leading).combined(with: .opacity))
                 }
@@ -1472,41 +1583,126 @@ struct InputBar: View {
     }
 }
 
+struct StreamingBubble: View {
+    let text: String
+    let isDark: Bool
+    let fontScale: Double
+
+    var body: some View {
+        HStack(alignment: .bottom) {
+            (Text(text) + Text(" \u{25CF}").font(.system(size: 11 * fontScale)).foregroundColor(AetherColors.amber))
+                .font(.system(size: 15 * fontScale))
+                .foregroundColor(isDark ? AetherColors.warmGray100 : AetherColors.warmBlack)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 2)
+                .padding(.vertical, 4)
+            Spacer(minLength: 60)
+        }
+        .padding(.horizontal, 16)
+    }
+}
+
 struct TypingIndicator: View {
     let message: String?
     let isDark: Bool
+    @State private var appearedAt = Date()
+
+    private static let composingPhrases = [
+        "Composing a response",
+        "Gathering thoughts",
+        "Choosing the right words",
+        "Polishing the reply",
+        "Still composing, thanks for waiting"
+    ]
+
+    private func statusText(at time: TimeInterval) -> String {
+        if let message, !message.isEmpty, message != "Composing a response" {
+            return message
+        }
+        let elapsed = time - appearedAt.timeIntervalSinceReferenceDate
+        let index = min(max(0, Int(elapsed / 6)), Self.composingPhrases.count - 1)
+        return Self.composingPhrases[index]
+    }
 
     var body: some View {
         HStack {
-            VStack(alignment: .leading, spacing: 7) {
-                if let message, !message.isEmpty {
-                    Text(message)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(isDark ? AetherColors.warmGray200 : AetherColors.warmGray600)
-                }
-                TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
-                    let time = timeline.date.timeIntervalSinceReferenceDate
-                    HStack(spacing: 6) {
-                        ForEach(0..<3, id: \.self) { index in
-                            let phase = time * 5.2 - Double(index) * 0.62
-                            let lift = max(0, sin(phase)) * -7
-                            Circle()
-                                .fill(isDark ? AetherColors.warmGray400 : AetherColors.warmGray500)
-                                .frame(width: 8, height: 8)
-                                .offset(y: lift)
-                                .scaleEffect(1 + max(0, sin(phase)) * 0.22)
-                                .opacity(0.62 + max(0, sin(phase)) * 0.38)
-                        }
+            TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
+                let time = timeline.date.timeIntervalSinceReferenceDate
+                let breath = sin(time * 2.6)
+
+                HStack(spacing: 10) {
+                    ZStack {
+                        Circle()
+                            .fill(
+                                RadialGradient(
+                                    colors: [AetherColors.amber.opacity(0.5), .clear],
+                                    center: .center,
+                                    startRadius: 1,
+                                    endRadius: 13
+                                )
+                            )
+                            .frame(width: 26, height: 26)
+                            .scaleEffect(1 + 0.22 * breath)
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [AetherColors.amber, AetherColors.copper],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 9, height: 9)
+                            .scaleEffect(1 + 0.14 * breath)
                     }
+                    .frame(width: 18, height: 18)
+
+                    Text(statusText(at: time))
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(shimmer(at: time))
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 14)
-            .background(isDark ? AetherColors.warmGray800 : Color.white)
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .background(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .fill(isDark ? AetherColors.warmGray800 : Color.white)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 22, style: .continuous)
+                            .strokeBorder(
+                                LinearGradient(
+                                    colors: isDark
+                                        ? [Color.white.opacity(0.12), Color.white.opacity(0.03)]
+                                        : [AetherColors.oakPale.opacity(0.8), AetherColors.oakPale.opacity(0.3)],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                ),
+                                lineWidth: 1
+                            )
+                    )
+                    .shadow(color: AetherColors.oakDark.opacity(isDark ? 0.4 : 0.08), radius: 12, y: 4)
+                    .shadow(color: AetherColors.oakDark.opacity(isDark ? 0.25 : 0.04), radius: 2, y: 1)
+            )
             .padding(.leading, 16)
             Spacer()
         }
+    }
+
+    private func shimmer(at time: TimeInterval) -> LinearGradient {
+        let base = isDark ? AetherColors.warmGray400 : AetherColors.warmGray500
+        let highlight = isDark ? AetherColors.oakPale : AetherColors.oakMedium
+        let sweep = (time * 0.55).truncatingRemainder(dividingBy: 1.8) - 0.4
+        let clamp: (Double) -> Double = { min(1, max(0, $0)) }
+        return LinearGradient(
+            stops: [
+                .init(color: base, location: 0),
+                .init(color: base, location: clamp(sweep - 0.25)),
+                .init(color: highlight, location: clamp(sweep)),
+                .init(color: base, location: clamp(sweep + 0.25)),
+                .init(color: base, location: 1)
+            ],
+            startPoint: .leading,
+            endPoint: .trailing
+        )
     }
 }
 
@@ -1525,6 +1721,53 @@ struct ChatEmptyState: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.horizontal, 32)
+    }
+}
+
+struct WebSearchSuggestionView: View {
+    let query: String
+    let isDark: Bool
+    let onSearch: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "globe")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundColor(AetherColors.oakMedium)
+                .frame(width: 32, height: 32)
+                .background(AetherColors.oakMedium.opacity(isDark ? 0.16 : 0.10))
+                .clipShape(Circle())
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Want a current answer?")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(isDark ? AetherColors.oakPale : AetherColors.warmBlack)
+                Text(query)
+                    .font(.system(size: 11))
+                    .foregroundColor(isDark ? AetherColors.warmGray400 : AetherColors.warmGray600)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 4)
+
+            Button("Search", action: onSearch)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(.white)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+                .background(AetherColors.oakMedium)
+                .clipShape(Capsule())
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(AetherColors.oakMedium.opacity(isDark ? 0.24 : 0.16), lineWidth: 1)
+        )
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
     }
 }
 

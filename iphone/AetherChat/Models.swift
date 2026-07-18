@@ -564,6 +564,11 @@ class AppState: ObservableObject {
                 memoryContext: memoryContext,
                 customSystemPrompt: runtimeSystemPrompt
             )
+            /*
+             Anti-doom-loop recovery is intentionally disabled while the model-level
+             tuning is being evaluated. Keep this block intact so it can be restored
+             if TestFlight reveals a failure mode the model does not catch.
+
             if isLoopingResponse(response, in: messageSnapshot) {
                 generationStatusMessage = "Redirecting repeated response"
                 response = try await generateReply(
@@ -587,6 +592,7 @@ class AppState: ObservableObject {
                     response = fallbackRedirectResponse(latestUserText: latestUserText)
                 }
             }
+            */
             response = AetherResponseNormalizer.displayText(response)
             response = responseWithSources(response, sourcesMarkdown: webSourcesMarkdown)
             if shouldOfferSearch,
