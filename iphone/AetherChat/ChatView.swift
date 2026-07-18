@@ -706,12 +706,13 @@ struct MessageBubble: View {
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .trailing)
-                    .padding(.trailing, 2)
+                        .padding(.trailing, 2)
                 }
             }
+            .frame(maxWidth: isUser ? nil : .infinity, alignment: .leading)
 
-            if !isUser { Spacer(minLength: 60) }
         }
+        .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
         .padding(.horizontal, 16)
         .sheet(item: $sharePayload) { payload in
             ActivityView(items: payload.activityItems)
@@ -851,6 +852,7 @@ struct MarkdownMessageText: View {
                     .padding(.top, 2)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .font(.system(size: scaled(15)))
     }
 
@@ -1024,6 +1026,7 @@ struct CodeBlockView: View {
                     .padding(.bottom, 6)
                     .fixedSize(horizontal: true, vertical: false)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .scrollIndicators(.visible)
 
             Button {
@@ -1044,6 +1047,7 @@ struct CodeBlockView: View {
             .buttonStyle(.plain)
             .padding(8)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(isDark ? AetherColors.warmGray900.opacity(0.92) : AetherColors.warmGray100.opacity(0.95))
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(
