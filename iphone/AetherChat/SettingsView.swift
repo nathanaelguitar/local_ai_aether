@@ -5,6 +5,7 @@ struct SettingsView: View {
     @EnvironmentObject var subscription: CanopySubscriptionManager
     @Environment(\.dismiss) var dismiss
     @State private var showingSystemPreferences = false
+    @State private var showingRecentlyDeleted = false
     @State private var sharePayload: SharePayload?
     @State private var betaTelemetryEnabled = AetherBetaTelemetry.shared.isEnabled
 
@@ -42,6 +43,21 @@ struct SettingsView: View {
                                         Divider().padding(.leading, 56)
                                     }
                                 }
+                            }
+                            .background(Color(UIColor.secondarySystemBackground))
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        }
+
+                        // Chats
+                        SettingsSection(title: "Chats") {
+                            SettingsNavRow(
+                                icon: "trash",
+                                title: "Recently Deleted",
+                                subtitle: state.recentlyDeleted.isEmpty
+                                    ? "Deleted chats are kept for \(AppState.deletedRetentionDays) days"
+                                    : "\(state.recentlyDeleted.count) chat\(state.recentlyDeleted.count == 1 ? "" : "s") \u{00B7} kept \(AppState.deletedRetentionDays) days"
+                            ) {
+                                showingRecentlyDeleted = true
                             }
                             .background(Color(UIColor.secondarySystemBackground))
                             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -189,6 +205,9 @@ struct SettingsView: View {
         }
         .sheet(item: $sharePayload) { payload in
             ActivityView(items: payload.activityItems)
+        }
+        .sheet(isPresented: $showingRecentlyDeleted) {
+            RecentlyDeletedView()
         }
         .onAppear {
             state.inferenceProvider = .onDevice
@@ -803,5 +822,123 @@ struct AssistantPickerRow: View {
                 }
             }
         }
+    }
+}
+
+struct RecentlyDeletedView: View {
+    @EnvironmentObject var state: AppState
+    @Environment(\.dismiss) var dismiss
+    @State private var showEmptyConfirm = false
+
+    var body: some View {
+        NavigationStack {
+            OakBackground {
+                if state.recentlyDeleted.isEmpty {
+                    VStack(spacing: 12) {
+                        Image(systemName: "trash.slash")
+                            .font(.system(size: 44))
+                            .foregroundColor(AetherColors.warmGray400)
+                        Text("Nothing here")
+                            .font(.system(size: 17, weight: .medium))
+                            .foregroundColor(AetherColors.warmGray600)
+                        Text("Deleted chats stay here for \(AppState.deletedRetentionDays) days before they're removed for good.")
+                            .font(.system(size: 14))
+                            .foregroundColor(AetherColors.warmGray500)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 40)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    List {
+                        ForEach(state.recentlyDeleted) { item in
+                            RecentlyDeletedRow(
+                                item: item,
+                                isDark: state.isDarkTheme,
+                                onRestore: { state.restoreDeleted(item.id) }
+                            )
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                Button(role: .destructive) {
+                                    state.permanentlyDeleteConversation(item.id)
+                                } label: {
+                                    Label("Delete Now", systemImage: "trash.fill")
+                                }
+                            }
+                        }
+                    }
+                    .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
+                }
+            }
+            .navigationTitle("Recently Deleted")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Done") { dismiss() }
+                        .foregroundColor(AetherColors.oakMedium)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Empty") { showEmptyConfirm = true }
+                        .foregroundColor(state.recentlyDeleted.isEmpty ? AetherColors.warmGray400 : AetherColors.error)
+                        .disabled(state.recentlyDeleted.isEmpty)
+                }
+            }
+            .confirmationDialog(
+                "Permanently delete all recently deleted chats?",
+                isPresented: $showEmptyConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("Delete All Forever", role: .destructive) {
+                    state.emptyRecentlyDeleted()
+                }
+                Button("Cancel", role: .cancel) {}
+            }
+        }
+        .preferredColorScheme(state.isDarkTheme ? .dark : .light)
+    }
+}
+
+struct RecentlyDeletedRow: View {
+    let item: DeletedConversation
+    let isDark: Bool
+    let onRestore: () -> Void
+
+    private var daysLeft: Int {
+        let elapsed = Int(Date().timeIntervalSince(item.deletedAt) / 86_400)
+        return max(0, AppState.deletedRetentionDays - elapsed)
+    }
+
+    var body: some View {
+        HStack(spacing: 14) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(item.conversation.title)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(isDark ? AetherColors.warmGray200 : AetherColors.warmBlack)
+                    .lineLimit(1)
+                Text(daysLeft == 0 ? "Removed for good today" : "Gone forever in \(daysLeft) day\(daysLeft == 1 ? "" : "s")")
+                    .font(.system(size: 12))
+                    .foregroundColor(AetherColors.warmGray500)
+            }
+            Spacer()
+            Button(action: onRestore) {
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.uturn.backward")
+                        .font(.system(size: 12, weight: .semibold))
+                    Text("Restore")
+                        .font(.system(size: 13, weight: .semibold))
+                }
+                .foregroundColor(AetherColors.oakMedium)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(AetherColors.oakMedium.opacity(0.12))
+                .clipShape(Capsule())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(14)
+        .background(isDark ? AetherColors.warmGray800 : Color.white)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 }

@@ -6,6 +6,8 @@ struct ConversationListView: View {
     @State private var showNewChat = false
     @State private var selectedConversationId: UUID? = nil
     @State private var showSettings = false
+    @State private var undoDeleted: Conversation?
+    @State private var undoDismissTask: Task<Void, Never>?
 
     var filtered: [Conversation] {
         guard let ws = selectedWorkspace else { return state.conversations }
@@ -63,7 +65,7 @@ struct ConversationListView: View {
                                 ForEach(pinned) { conv in
                                     ConversationRow(conv: conv, onTap: { selectedConversationId = conv.id },
                                                     onPin: { state.togglePin(conv.id) },
-                                                    onDelete: { state.delete(conv.id) })
+                                                    onDelete: { softDelete(conv) })
                                 }
                             }
                             if !recent.isEmpty {
@@ -71,7 +73,7 @@ struct ConversationListView: View {
                                 ForEach(recent) { conv in
                                     ConversationRow(conv: conv, onTap: { selectedConversationId = conv.id },
                                                     onPin: { state.togglePin(conv.id) },
-                                                    onDelete: { state.delete(conv.id) })
+                                                    onDelete: { softDelete(conv) })
                                 }
                             }
                             if filtered.isEmpty {
@@ -110,6 +112,46 @@ struct ConversationListView: View {
                         .padding(.trailing, 20)
                         .padding(.bottom, 36)
                     }
+                }
+
+                if let undo = undoDeleted {
+                    VStack {
+                        HStack(spacing: 12) {
+                            Image(systemName: "trash")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(state.isDarkTheme ? AetherColors.warmGray400 : AetherColors.warmGray500)
+                            Text("\u{201C}\(undo.title)\u{201D} deleted")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundColor(state.isDarkTheme ? AetherColors.warmGray200 : AetherColors.warmBlack)
+                                .lineLimit(1)
+                            Button(action: undoDelete) {
+                                Text("Undo")
+                                    .font(.system(size: 14, weight: .bold))
+                                    .foregroundColor(AetherColors.copper)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 13)
+                        .background(
+                            Capsule()
+                                .fill(state.isDarkTheme ? AetherColors.warmGray800 : Color.white)
+                                .overlay(
+                                    Capsule()
+                                        .strokeBorder(
+                                            state.isDarkTheme
+                                                ? Color.white.opacity(0.1)
+                                                : AetherColors.oakPale.opacity(0.6),
+                                            lineWidth: 1
+                                        )
+                                )
+                                .shadow(color: AetherColors.oakDark.opacity(state.isDarkTheme ? 0.5 : 0.18), radius: 14, y: 5)
+                        )
+                        .padding(.top, 64)
+                        Spacer()
+                    }
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .zIndex(2)
                 }
             }
             .navigationBarHidden(true)
@@ -165,6 +207,31 @@ struct ConversationListView: View {
             SettingsView()
         }
         .preferredColorScheme(state.isDarkTheme ? .dark : .light)
+    }
+
+    private func softDelete(_ conv: Conversation) {
+        state.delete(conv.id)
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+            undoDeleted = conv
+        }
+        undoDismissTask?.cancel()
+        undoDismissTask = Task {
+            try? await Task.sleep(nanoseconds: 4_500_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.3)) {
+                undoDeleted = nil
+            }
+        }
+    }
+
+    private func undoDelete() {
+        if let conv = undoDeleted {
+            state.restoreDeleted(conv.id)
+        }
+        undoDismissTask?.cancel()
+        withAnimation(.easeOut(duration: 0.2)) {
+            undoDeleted = nil
+        }
     }
 }
 

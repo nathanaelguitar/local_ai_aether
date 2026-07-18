@@ -195,6 +195,13 @@ struct Conversation: Identifiable, Codable, Sendable {
     }
 }
 
+struct DeletedConversation: Identifiable, Codable, Sendable {
+    let conversation: Conversation
+    let deletedAt: Date
+
+    var id: UUID { conversation.id }
+}
+
 struct ChatMessage: Identifiable, Codable, Sendable {
     let id: UUID
     let role: MessageRole
@@ -296,8 +303,11 @@ class AppState: ObservableObject {
     private let webSearch = AetherWebSearchService()
     private let locationService = AetherLocationService()
     private let networkMonitor = AetherNetworkMonitor()
+    @Published var recentlyDeleted: [DeletedConversation] = []
     private var offlineWebNoticeShownConversationIDs: Set<UUID> = []
     private var activeInferenceCount = 0
+
+    static let deletedRetentionDays = 30
 
     init(memoryStore: AetherMemoryStore = .shared) {
         self.memoryStore = memoryStore
@@ -307,6 +317,8 @@ class AppState: ObservableObject {
             : savedConversations.map(Self.canonicalizeBuiltInWorkspace).map(AetherTitleGenerator.repairIfNeeded)
         removeLegacySeedConversations()
         persistAllConversations()
+        loadRecentlyDeleted()
+        purgeExpiredDeletedConversations()
     }
 
     var availablePersonas: [AssistantPersona] {
@@ -337,8 +349,58 @@ class AppState: ObservableObject {
     }
 
     func delete(_ id: UUID) {
+        if let conversation = conversations.first(where: { $0.id == id }) {
+            recentlyDeleted.insert(DeletedConversation(conversation: conversation, deletedAt: Date()), at: 0)
+            saveRecentlyDeleted()
+        }
         conversations.removeAll { $0.id == id }
         memoryStore.deleteConversation(id: id)
+    }
+
+    func restoreDeleted(_ id: UUID) {
+        guard let index = recentlyDeleted.firstIndex(where: { $0.id == id }) else { return }
+        let conversation = recentlyDeleted.remove(at: index).conversation
+        conversations.insert(conversation, at: 0)
+        memoryStore.saveConversation(conversation)
+        saveRecentlyDeleted()
+    }
+
+    func permanentlyDeleteConversation(_ id: UUID) {
+        recentlyDeleted.removeAll { $0.id == id }
+        saveRecentlyDeleted()
+    }
+
+    func emptyRecentlyDeleted() {
+        recentlyDeleted.removeAll()
+        saveRecentlyDeleted()
+    }
+
+    private func purgeExpiredDeletedConversations() {
+        let cutoff = Date().addingTimeInterval(-Double(Self.deletedRetentionDays) * 86_400)
+        let kept = recentlyDeleted.filter { $0.deletedAt > cutoff }
+        if kept.count != recentlyDeleted.count {
+            recentlyDeleted = kept
+            saveRecentlyDeleted()
+        }
+    }
+
+    private static var recentlyDeletedFileURL: URL? {
+        try? FileManager.default
+            .url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+            .appendingPathComponent("RecentlyDeletedConversations.json")
+    }
+
+    private func loadRecentlyDeleted() {
+        guard let url = Self.recentlyDeletedFileURL,
+              let data = try? Data(contentsOf: url),
+              let items = try? JSONDecoder().decode([DeletedConversation].self, from: data) else { return }
+        recentlyDeleted = items
+    }
+
+    private func saveRecentlyDeleted() {
+        guard let url = Self.recentlyDeletedFileURL,
+              let data = try? JSONEncoder().encode(recentlyDeleted) else { return }
+        try? data.write(to: url, options: .atomic)
     }
 
     func createConversation(title: String, workspace: Workspace, persona: AssistantPersona) -> UUID {
