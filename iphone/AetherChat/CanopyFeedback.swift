@@ -173,14 +173,6 @@ enum CanopyFeedback {
 
         Thanks for taking a moment to report this. Your feedback helps us improve the model and make CanopyChat more useful. We work hard to provide the best service to our customers.
 
-        Conversation: \(conversation?.title ?? "Unknown")
-        Assistant: \(conversation?.persona.name ?? "Unknown")
-        Message ID: \(message.id.uuidString)
-        Timestamp: \(ISO8601DateFormatter().string(from: Date()))
-        App Version: \(appVersion)
-        Device: \(UIDevice.current.model)
-        iOS: \(UIDevice.current.systemVersion)
-
         WHAT WENT WRONG?
         Please tell us what was incorrect, confusing, incomplete, or unexpected.
 
@@ -192,6 +184,15 @@ enum CanopyFeedback {
         \(cleanedResponse)
 
         Thank you for helping us make CanopyChat better.
+
+        TECHNICAL DETAILS FOR SUPPORT
+        Conversation: \(conversation?.title ?? "Unknown")
+        Assistant: \(conversation?.persona.name ?? "Unknown")
+        Message ID: \(message.id.uuidString)
+        Timestamp: \(ISO8601DateFormatter().string(from: Date()))
+        App Version: \(appVersion)
+        Device: \(UIDevice.current.model)
+        iOS: \(UIDevice.current.systemVersion)
         """
     }
 
@@ -200,12 +201,6 @@ enum CanopyFeedback {
         CanopyChat Issue Report
 
         Thanks for helping us improve CanopyChat. The details below will help us understand and fix the problem.
-
-        Conversation: \(conversation?.title ?? "Not provided")
-        Timestamp: \(ISO8601DateFormatter().string(from: Date()))
-        App Version: \(appVersion)
-        Device: \(UIDevice.current.model)
-        iOS: \(UIDevice.current.systemVersion)
 
         WHAT HAPPENED?
         Please describe what went wrong.
@@ -221,6 +216,13 @@ enum CanopyFeedback {
         3.
 
         Thank you for helping us make CanopyChat better.
+
+        TECHNICAL DETAILS FOR SUPPORT
+        Conversation: \(conversation?.title ?? "Not provided")
+        Timestamp: \(ISO8601DateFormatter().string(from: Date()))
+        App Version: \(appVersion)
+        Device: \(UIDevice.current.model)
+        iOS: \(UIDevice.current.systemVersion)
         """
     }
 

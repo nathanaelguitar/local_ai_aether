@@ -630,7 +630,11 @@ struct MessageBubble: View {
                         Button {
                             selectedRating = .negative
                             onRating(.negative)
-                            showingNegativeFeedback = true
+                            Task { @MainActor in
+                                try? await Task.sleep(nanoseconds: 180_000_000)
+                                guard !Task.isCancelled else { return }
+                                showingNegativeFeedback = true
+                            }
                         } label: {
                             Image(systemName: selectedRating == .negative ? "hand.thumbsdown.fill" : "hand.thumbsdown")
                                 .font(.system(size: 12, weight: .semibold))
@@ -711,16 +715,15 @@ struct MessageBubble: View {
         .sheet(item: $sharePayload) { payload in
             ActivityView(items: payload.activityItems)
         }
-        .confirmationDialog(
-            "Help improve CanopyChat",
-            isPresented: $showingNegativeFeedback,
-            titleVisibility: .visible
+        .alert(
+            "Help improve CanopyChat?",
+            isPresented: $showingNegativeFeedback
         ) {
-            Button("Give feedback") { onFeedback() }
-            Button("Share failure") { onShareFailure() }
+            Button("Tell us what went wrong") { onFeedback() }
+            Button("Share this failure") { onShareFailure() }
             Button("Not now", role: .cancel) {}
         } message: {
-            Text("We work hard to provide the best service to our customers. Tell us what went wrong so we can improve the model.")
+            Text("Thanks for letting us know. We work hard to provide the best service to our customers, and your feedback helps us improve the model.")
         }
         .onDisappear {
             if speechState != .stopped {
