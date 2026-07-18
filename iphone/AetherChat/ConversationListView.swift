@@ -260,6 +260,11 @@ struct ConversationRow: View {
                 Label("Delete", systemImage: "trash")
             }
         }
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            Button(role: .destructive, action: onDelete) {
+                Label("Delete", systemImage: "trash")
+            }
+        }
     }
 
     func relativeDate(_ date: Date) -> String {
