@@ -8,6 +8,7 @@ struct SettingsView: View {
     @State private var showingRecentlyDeleted = false
     @State private var sharePayload: SharePayload?
     @State private var betaTelemetryEnabled = AetherBetaTelemetry.shared.isEnabled
+    @State private var showingContributorConsent = false
 
     var body: some View {
         NavigationStack {
@@ -135,22 +136,19 @@ struct SettingsView: View {
                             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                         }
 
-                        if AetherBuildChannel.isBeta {
+                        if CanopyContributorProgram.isContributorBuild {
                             SettingsSection(title: "Beta Program") {
                                 VStack(spacing: 0) {
-                                    Toggle(isOn: $betaTelemetryEnabled) {
+                                    Toggle(isOn: contributorTelemetryBinding) {
                                         SettingsRowLabel(
                                             icon: "chart.bar.xaxis",
-                                            title: "Share beta diagnostics",
-                                            subtitle: "Prompts, responses, ratings, and web-search choices"
+                                            title: "Help improve CanopyChat",
+                                            subtitle: "Share selected beta failures and a small comparison sample"
                                         )
                                     }
                                     .tint(AetherColors.oakMedium)
                                     .padding(.horizontal, 16)
                                     .padding(.vertical, 12)
-                                    .onChange(of: betaTelemetryEnabled) { _, enabled in
-                                        AetherBetaTelemetry.shared.setEnabled(enabled)
-                                    }
                                 }
                                 .background(Color(UIColor.secondarySystemBackground))
                                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -209,6 +207,19 @@ struct SettingsView: View {
         .sheet(isPresented: $showingRecentlyDeleted) {
             RecentlyDeletedView()
         }
+        .confirmationDialog(
+            "Help improve CanopyChat?",
+            isPresented: $showingContributorConsent,
+            titleVisibility: .visible
+        ) {
+            Button("Share selected beta data") {
+                betaTelemetryEnabled = true
+                CanopyContributorProgram.join()
+            }
+            Button("Not now", role: .cancel) {}
+        } message: {
+            Text("CanopyChat will send selected prompts and answers when you rate an answer poorly, regenerate it, or hit a model failure, plus a small random comparison sample. Attachments and full chat history are not included. You can stop at any time; unsent beta data will be deleted.")
+        }
         .onAppear {
             state.inferenceProvider = .onDevice
             state.selectedModel = AetherModelCatalog.aetherV1DisplayName
@@ -230,6 +241,20 @@ struct SettingsView: View {
                 }
             }
         }
+    }
+
+    private var contributorTelemetryBinding: Binding<Bool> {
+        Binding(
+            get: { betaTelemetryEnabled },
+            set: { enabled in
+                if enabled {
+                    showingContributorConsent = true
+                } else {
+                    betaTelemetryEnabled = false
+                    CanopyContributorProgram.stopContributing()
+                }
+            }
+        )
     }
 }
 

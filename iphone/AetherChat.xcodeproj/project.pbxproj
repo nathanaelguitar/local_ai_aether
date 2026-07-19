@@ -25,7 +25,8 @@
 		A0643D6E50DAB16D431C0350 /* AetherOnDeviceClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B74413AB0BA1012F10A00D97 /* AetherOnDeviceClient.swift */; };
 		A9253ECB0B2AEC60F134903A /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13F5FF0AD4ED4CEF36E66D60 /* Theme.swift */; };
 		B0CAA0CCADC02CFB94962E66 /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D5974F2A6845866B4D19213 /* ChatView.swift */; };
-		B9C9BC29564B43EFA9D755EC /* PaywallView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92C0E75FA6A05969E3879A85 /* PaywallView.swift */; };
+				B9C9BC29564B43EFA9D755EC /* PaywallView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92C0E75FA6A05969E3879A85 /* PaywallView.swift */; };
+				C0A7B001C0A7B001C0A7B001 /* ContributorProgram.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0A7B002C0A7B002C0A7B002 /* ContributorProgram.swift */; };
 		BD19FEDCFEC33192A151A809 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F7C8667FF0B2BD51ECB8A79 /* ContentView.swift */; };
 		BD40D3F027D6CEF0ED707465 /* LlamaSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 2CDBE4BCB2CEB38B77FCD8FE /* LlamaSwift */; };
 		C2FC5A160607908B968E4732 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 9403F2AC7BA0B0F471AE5FB3 /* PrivacyInfo.xcprivacy */; };
@@ -73,7 +74,8 @@
 		B1A040BA03975C0FEAB2A8C9 /* AetherLocationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AetherLocationService.swift; sourceTree = "<group>"; };
 		B53395A9747A04EF161105F9 /* AetherChat.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AetherChat.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B74413AB0BA1012F10A00D97 /* AetherOnDeviceClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AetherOnDeviceClient.swift; sourceTree = "<group>"; };
-		C8141DD10A44BEB1A061A453 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+				C8141DD10A44BEB1A061A453 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+				C0A7B002C0A7B002C0A7B002 /* ContributorProgram.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContributorProgram.swift; sourceTree = "<group>"; };
 		D26E0F534E655ABC495FDF36 /* OakBackground.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OakBackground.swift; sourceTree = "<group>"; };
 		D318C23330FCBADB7D0BB5BD /* ScreenshotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenshotTests.swift; sourceTree = "<group>"; };
 		DBA431CB63F6A9ACBC2F673A /* ConversationListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationListView.swift; sourceTree = "<group>"; };
@@ -146,8 +148,17 @@
 				E9B65CA3006F022BA596EAD5 /* SettingsView.swift */,
 				13F5FF0AD4ED4CEF36E66D60 /* Theme.swift */,
 				AA3332E3AE730AB8A109BB39 /* WelcomeView.swift */,
+				C0A7B003C0A7B003C0A7B003 /* Contributor */,
 			);
 			path = AetherChat;
+			sourceTree = "<group>";
+		};
+		C0A7B003C0A7B003C0A7B003 /* Contributor */ = {
+			isa = PBXGroup;
+			children = (
+				C0A7B002C0A7B002C0A7B002 /* ContributorProgram.swift */,
+			);
+			path = Contributor;
 			sourceTree = "<group>";
 		};
 		96190B70EB576AF72A33524F = {
@@ -297,6 +308,7 @@
 				80644A3A9DF1AB3BD57AC6DD /* SettingsView.swift in Sources */,
 				A9253ECB0B2AEC60F134903A /* Theme.swift in Sources */,
 				DEA563445D69FD229384551E /* WelcomeView.swift in Sources */,
+				C0A7B001C0A7B001C0A7B001 /* ContributorProgram.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -413,6 +425,7 @@
 			buildSettings = {
 				AETHER_BUILD_CHANNEL = production;
 				AETHER_BETA_TELEMETRY_ENDPOINT = "";
+				AETHER_BETA_TELEMETRY_HMAC_SECRET = "";
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
@@ -439,8 +452,9 @@
 		2812862BF966DE3764C148B6 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				AETHER_BUILD_CHANNEL = beta;
+				AETHER_BUILD_CHANNEL = contributor;
 				AETHER_BETA_TELEMETRY_ENDPOINT = "";
+				AETHER_BETA_TELEMETRY_HMAC_SECRET = "";
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;

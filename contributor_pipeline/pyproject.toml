@@ -1,0 +1,9 @@
+[project]
+name = "canopy-contributor-pipeline"
+version = "0.1.0"
+description = "Local-first contributor telemetry ingestion and curation for CanopyChat"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
