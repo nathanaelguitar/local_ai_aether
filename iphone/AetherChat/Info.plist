@@ -43,6 +43,8 @@
 	<string>$(AETHER_BUILD_CHANNEL)</string>
 	<key>AETHER_BETA_TELEMETRY_ENDPOINT</key>
 	<string>$(AETHER_BETA_TELEMETRY_ENDPOINT)</string>
+	<key>AETHER_BETA_TELEMETRY_HMAC_SECRET</key>
+	<string>$(AETHER_BETA_TELEMETRY_HMAC_SECRET)</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

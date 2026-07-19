@@ -281,9 +281,27 @@ struct ChatView: View {
                 let failure = CanopyFeedback.modelFeedback(message: msg, conversation: conversation)
                 reportIssue(failure)
             },
+            onCorrection: { correction in
+                AetherBetaTelemetry.shared.record(
+                    .userCorrection,
+                    conversationID: conversationId,
+                    messageID: msg.id,
+                    prompt: promptText(for: msg),
+                    response: msg.content,
+                    metadata: ["user_correction": String(correction.prefix(1_024))]
+                )
+            },
             onResend: resendAction,
             onEdit: editAction
         )
+    }
+
+    private func promptText(for assistantMessage: ChatMessage) -> String? {
+        guard let conversation,
+              let responseIndex = conversation.messages.firstIndex(where: { $0.id == assistantMessage.id }) else { return nil }
+        return conversation.messages[..<responseIndex]
+            .last(where: { $0.role == .user })?
+            .content
     }
 
     func send() {
@@ -551,6 +569,7 @@ struct MessageBubble: View {
     let onFeedback: () -> Void
     let onRating: (AetherFeedbackRating) -> Void
     let onShareFailure: () -> Void
+    let onCorrection: (String) -> Void
     let onResend: (() -> Void)?
     let onEdit: (() -> Void)?
     @State private var copiedMessage = false
@@ -558,6 +577,7 @@ struct MessageBubble: View {
     @State private var speechState: SpeechPlaybackState = .stopped
     @State private var selectedRating: AetherFeedbackRating?
     @State private var showingNegativeFeedback = false
+    @State private var showingCorrectionEditor = false
     private let speech = AetherSpeechController.shared
 
     var isUser: Bool { message.role == .user }
@@ -717,10 +737,16 @@ struct MessageBubble: View {
         .sheet(item: $sharePayload) { payload in
             ActivityView(items: payload.activityItems)
         }
+        .sheet(isPresented: $showingCorrectionEditor) {
+            ContributorCorrectionSheet { correction in
+                onCorrection(correction)
+            }
+        }
         .alert(
             "Help improve CanopyChat?",
             isPresented: $showingNegativeFeedback
         ) {
+            Button("Add a correction") { showingCorrectionEditor = true }
             Button("Tell us what went wrong") { onFeedback() }
             Button("Share this failure") { onShareFailure() }
             Button("Not now", role: .cancel) {}
@@ -766,6 +792,45 @@ struct MessageBubble: View {
             )
         )
         .frame(maxWidth: isUser ? 320 : .infinity, alignment: isUser ? .trailing : .leading)
+    }
+}
+
+private struct ContributorCorrectionSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var correction = ""
+    let onSubmit: (String) -> Void
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("What should CanopyChat have said instead?")
+                    .font(.system(size: 20, weight: .semibold))
+                Text("A correction is especially useful for improving the Contributor Beta model.")
+                    .font(.system(size: 14))
+                    .foregroundColor(AetherColors.warmGray600)
+                TextEditor(text: $correction)
+                    .frame(minHeight: 180)
+                    .padding(10)
+                    .background(Color(UIColor.secondarySystemBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                Spacer()
+            }
+            .padding(20)
+            .navigationTitle("Add a correction")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Submit") {
+                        onSubmit(correction.trimmingCharacters(in: .whitespacesAndNewlines))
+                        dismiss()
+                    }
+                    .disabled(correction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+        }
     }
 }
 

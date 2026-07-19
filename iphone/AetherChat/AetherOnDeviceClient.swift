@@ -4,6 +4,11 @@ import Foundation
 import LlamaSwift
 #endif
 
+struct AetherGeneratedReply: Sendable {
+    let text: String
+    let didReachOutputLimit: Bool
+}
+
 actor AetherOnDeviceClient {
     #if canImport(LlamaSwift)
     private var engine: AetherLlamaEngine?
@@ -30,7 +35,7 @@ actor AetherOnDeviceClient {
         customSystemPrompt: String = "",
         status: StatusHandler? = nil,
         onToken: (@Sendable (String) -> Void)? = nil
-    ) async throws -> String {
+    ) async throws -> AetherGeneratedReply {
         #if canImport(LlamaSwift)
         let modelFiles = try await AetherModelStore.localAetherV1Files(status: status)
         let tokenBudget = Int(AetherModelCatalog.aetherV1ContextTokens - AetherModelCatalog.aetherV1MaxOutputTokens) - 64
@@ -84,7 +89,7 @@ actor AetherOnDeviceClient {
         modelFiles: AetherModelStore.AetherV1Files,
         status: StatusHandler?,
         onToken: (@Sendable (String) -> Void)? = nil
-    ) async throws -> String {
+    ) async throws -> AetherGeneratedReply {
         for attempt in 0...1 {
             do {
                 try Task.checkCancellation()
@@ -486,7 +491,7 @@ final class AetherLlamaEngine {
 
     typealias TokenHandler = @Sendable (String) -> Void
 
-    func generate(prompt: String, attachments: [ChatAttachment], onToken: TokenHandler? = nil) throws -> String {
+    func generate(prompt: String, attachments: [ChatAttachment], onToken: TokenHandler? = nil) throws -> AetherGeneratedReply {
         llama_memory_clear(llama_get_memory(context), true)
         if attachments.isEmpty {
             try Task.checkCancellation()
@@ -507,7 +512,7 @@ final class AetherLlamaEngine {
         return try generateCompletion(startPosition: startPosition, previousToken: llama_vocab_bos(vocab), onToken: onToken)
     }
 
-    private func generateCompletion(startPosition: Int32, previousToken: llama_token, onToken: TokenHandler? = nil) throws -> String {
+    private func generateCompletion(startPosition: Int32, previousToken: llama_token, onToken: TokenHandler? = nil) throws -> AetherGeneratedReply {
         // llama_token_to_piece returns UTF-8 bytes, and a Unicode scalar can be
         // split across adjacent token pieces. Keep the bytes intact until the
         // full completion is available; decoding each piece independently turns
@@ -519,6 +524,7 @@ final class AetherLlamaEngine {
         defer { llama_batch_free(batch) }
 
         let endMarker = Array("<|im_end|>".utf8)
+        var didReachOutputLimit = true
 
         for _ in 0..<AetherModelCatalog.aetherV1MaxOutputTokens {
             try Task.checkCancellation()
@@ -527,12 +533,14 @@ final class AetherLlamaEngine {
             }
             let next = try sampleGreedy()
             if next == llama_vocab_eos(vocab) || next == previousToken && generatedBytes.isEmpty {
+                didReachOutputLimit = false
                 break
             }
 
             generatedBytes.append(contentsOf: tokenPiece(next))
             if let markerStart = generatedBytes.firstRange(of: endMarker)?.lowerBound {
                 generatedBytes.removeSubrange(markerStart...)
+                didReachOutputLimit = false
                 break
             }
             if let onToken {
@@ -551,7 +559,7 @@ final class AetherLlamaEngine {
         guard !cleaned.isEmpty else {
             throw AetherOnDeviceError.emptyResponse
         }
-        return cleaned
+        return AetherGeneratedReply(text: cleaned, didReachOutputLimit: didReachOutputLimit)
     }
 
     /// Display-safe text for mid-generation streaming: hides a partially emitted

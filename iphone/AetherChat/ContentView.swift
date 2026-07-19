@@ -4,6 +4,7 @@ struct ContentView: View {
     @StateObject private var state = AppState()
     @StateObject private var subscription = CanopySubscriptionManager()
     @State private var showConversations = false
+    @State private var showingContributorDisclosure = false
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -24,8 +25,10 @@ struct ContentView: View {
                 }
             } else {
                 WelcomeView(onEnter: {
-                    withAnimation(.easeInOut(duration: 0.4)) {
-                        showConversations = true
+                    if CanopyContributorProgram.isContributorBuild, !CanopyContributorProgram.isEnrolled {
+                        showingContributorDisclosure = true
+                    } else {
+                        enterApp()
                     }
                 })
                 .transition(.asymmetric(
@@ -35,8 +38,30 @@ struct ContentView: View {
             }
         }
         .animation(.easeInOut(duration: 0.4), value: showConversations)
+        .confirmationDialog(
+            "Join the CanopyChat Contributor Beta",
+            isPresented: $showingContributorDisclosure,
+            titleVisibility: .visible
+        ) {
+            Button("I understand — join the beta") {
+                CanopyContributorProgram.join()
+                enterApp()
+            }
+            Button("Not now", role: .cancel) {}
+        } message: {
+            Text(CanopyContributorProgram.disclosure)
+        }
         .onChange(of: scenePhase) { _, phase in
             state.appIsActive = phase == .active
+            if phase == .active {
+                AetherBetaTelemetry.shared.flushPendingBatch()
+            }
+        }
+    }
+
+    private func enterApp() {
+        withAnimation(.easeInOut(duration: 0.4)) {
+            showConversations = true
         }
     }
 }

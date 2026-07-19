@@ -4,6 +4,26 @@ struct WelcomeView: View {
     @State private var visible = false
     var onEnter: () -> Void
 
+    private var isContributorBeta: Bool { CanopyContributorProgram.isContributorBuild }
+
+    private var introduction: String {
+        isContributorBeta
+            ? "Efficient on-device intelligence.\nHelp shape a better CanopyChat."
+            : "Private conversations that stay close.\nOn-device intelligence, built to tread lightly."
+    }
+
+    private var primaryFeature: (icon: String, title: String, subtitle: String) {
+        isContributorBeta
+            ? ("🌿", "Efficient On-Device AI", "Run the model already in your hand instead of a remote data center")
+            : ("🔒", "Privacy First", "CanopyChat runs locally on your iPhone by default")
+    }
+
+    private var secondaryFeature: (icon: String, title: String, subtitle: String) {
+        isContributorBeta
+            ? ("🧪", "Help Improve the Model", "Selected interactions are shared to evaluate and improve future versions")
+            : ("🌿", "Eco-Friendly Intelligence", "Use the model already in your hand instead of a data center")
+    }
+
     var body: some View {
         OakBackground {
             ScrollView {
@@ -36,7 +56,7 @@ struct WelcomeView: View {
                             .opacity(visible ? 1 : 0)
                             .animation(.easeOut(duration: 0.6).delay(0.35), value: visible)
 
-                        Text("Private conversations that stay close.\nOn-device intelligence, built to tread lightly.")
+                        Text(introduction)
                             .font(.system(size: 15))
                             .foregroundColor(AetherColors.warmGray600)
                             .multilineTextAlignment(.center)
@@ -50,10 +70,10 @@ struct WelcomeView: View {
 
                     // Features
                     VStack(spacing: 20) {
-                        FeatureRow(icon: "🔒", title: "Privacy First",
-                                   subtitle: "CanopyChat runs locally on your iPhone by default")
-                        FeatureRow(icon: "🌿", title: "Eco-Friendly Intelligence",
-                                   subtitle: "Use the model already in your hand instead of a data center")
+                        FeatureRow(icon: primaryFeature.icon, title: primaryFeature.title,
+                                   subtitle: primaryFeature.subtitle)
+                        FeatureRow(icon: secondaryFeature.icon, title: secondaryFeature.title,
+                                   subtitle: secondaryFeature.subtitle)
                         FeatureRow(icon: "🌳", title: "Organized by Workspace",
                                    subtitle: "Separate Personal, Work, Creative, and Research conversations")
                     }
@@ -66,7 +86,7 @@ struct WelcomeView: View {
 
                     // CTA
                     Button(action: onEnter) {
-                        Text("Enter Your Grove")
+                        Text(isContributorBeta ? "Join the Contributor Beta" : "Enter Your Grove")
                             .font(.system(size: 17, weight: .medium))
                             .foregroundColor(.white)
                             .frame(maxWidth: .infinity)

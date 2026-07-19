@@ -639,13 +639,14 @@ class AppState: ObservableObject {
                 }
             }
             generationStatusMessage = "Composing a response"
-            var response = try await generateReply(
+            let generatedReply = try await generateReply(
                 persona: persona,
                 messages: messageSnapshot,
                 webSearchContext: webSearchContext,
                 memoryContext: memoryContext,
                 customSystemPrompt: runtimeSystemPrompt
             )
+            var response = generatedReply.text
             /*
              Anti-doom-loop recovery is intentionally disabled while the model-level
              tuning is being evaluated. Keep this block intact so it can be restored
@@ -707,6 +708,16 @@ class AppState: ObservableObject {
                     "search_suggested": String(shouldOfferSearch)
                 ]
             )
+            if generatedReply.didReachOutputLimit {
+                AetherBetaTelemetry.shared.record(
+                    .responseTruncated,
+                    conversationID: id,
+                    messageID: responseMessageID,
+                    prompt: latestUserText,
+                    response: response,
+                    metadata: ["truncated": "true", "reason": "output_token_limit"]
+                )
+            }
             notifyIfNeeded(conversationTitle: conversations.first(where: { $0.id == id })?.title ?? "Canopy", response: response)
         } catch is CancellationError {
             modelLoadingMessage = nil
@@ -720,6 +731,36 @@ class AppState: ObservableObject {
             let errorMessage = localBackgroundInterruptionMessage(for: error)
                 ?? "Inference error: \(inferenceErrorDescription(error))"
             appendAssistantMessage(to: id, content: errorMessage)
+            let failedMessageID = conversations.first(where: { $0.id == id })?.messages.last(where: { $0.role == .assistant })?.id
+            AetherBetaTelemetry.shared.record(
+                .responseGenerated,
+                conversationID: id,
+                messageID: failedMessageID,
+                prompt: latestUserText,
+                response: errorMessage,
+                metadata: [
+                    "latency_ms": String(Int(Date().timeIntervalSince(inferenceStartedAt) * 1_000)),
+                    "inference_failed": "true"
+                ]
+            )
+            AetherBetaTelemetry.shared.record(
+                .inferenceFailed,
+                conversationID: id,
+                messageID: failedMessageID,
+                prompt: latestUserText,
+                response: errorMessage,
+                metadata: ["error": String(inferenceErrorDescription(error).prefix(512))]
+            )
+            if case AetherOnDeviceError.emptyResponse = error {
+                AetherBetaTelemetry.shared.record(
+                    .responseEmpty,
+                    conversationID: id,
+                    messageID: failedMessageID,
+                    prompt: latestUserText,
+                    response: errorMessage,
+                    metadata: ["reason": "empty_model_output"]
+                )
+            }
             notifyIfNeeded(conversationTitle: conversations.first(where: { $0.id == id })?.title ?? "Canopy", response: errorMessage)
         }
     }
@@ -750,7 +791,7 @@ class AppState: ObservableObject {
         webSearchContext: String? = nil,
         memoryContext: String? = nil,
         customSystemPrompt: String = ""
-    ) async throws -> String {
+    ) async throws -> AetherGeneratedReply {
         if selectedModel == AetherModelCatalog.aetherV1DisplayName {
             streamingPreview = nil
             return try await onDevice.send(
@@ -781,7 +822,8 @@ class AppState: ObservableObject {
             throw AetherOnDeviceError.unsupportedLocalModel(selectedModel)
         }
 
-        return try await backend.send(
+        return AetherGeneratedReply(
+            text: try await backend.send(
             endpoint: apiEndpoint,
             model: selectedModel,
             persona: persona,
@@ -789,6 +831,8 @@ class AppState: ObservableObject {
             webSearchContext: webSearchContext,
             memoryContext: memoryContext,
             customSystemPrompt: customSystemPrompt
+            ),
+            didReachOutputLimit: false
         )
     }
 
