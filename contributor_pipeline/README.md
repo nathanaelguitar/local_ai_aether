@@ -1,20 +1,19 @@
-# CanopyChat Contributor Pipeline
+# Canopy Contributor Pipeline
 
-This is the isolated, opt-in data path for the **CanopyChat Contributor Beta**. It is deliberately separate from inference and from the public app. It accepts selected, consented text interactions, stores the original batch immutably, and turns it into reviewable training and evaluation candidates on the DGX.
+This is the isolated, opt-in data path for the **Canopy Contributor Beta**. It accepts selected, consented text interactions, stores the original batch immutably, and turns it into reviewable training and evaluation candidates. It is separate from Canopy inference and from the public marketing website.
 
-It does **not** make the production app collect data. The iOS contributor integration is intentionally a separate step after the consent screen and privacy copy are approved.
+The service does not make the production app collect data. The iOS integration is a separate release-controlled step after consent and privacy copy are approved.
 
-## What it does
+## Data flow
 
 ```text
-Contributor beta app
-  -> authenticated HTTPS batch upload
-  -> immutable /raw batch on DGX
-  -> schema validation + basic PII redaction + dedupe
-  -> /bronze, /silver, /training, /eval, /quarantine JSONL datasets
+Contributor Beta app
+  -> Cloudflare Tunnel -> internal Caddy -> authenticated ingest
+  -> raw -> bronze -> silver -> gold/{training,eval}
+                         \-> quarantine
 ```
 
-The service only accepts an opaque installation identifier, selected prompt/response text, model/app metadata, and observable failure signals. It rejects batches without explicit model-improvement consent. Attachments, contact data, and device identifiers are not part of the protocol.
+Only the Cloudflare Tunnel has an external route. The DGX has no inbound router port and the Compose stack publishes no host port.
 
 ## Local development
 
@@ -25,19 +24,40 @@ cd contributor_pipeline
 export PYTHONPATH=src
 export CANOPY_CONTRIBUTOR_SHARED_SECRET="replace-with-a-random-32-byte-or-longer-secret"
 export CANOPY_CONTRIBUTOR_ROOT="$PWD/.data"
-python -m canopy_contributor.server
+python3 -m canopy_contributor.server
 ```
 
-The service listens on `127.0.0.1:8791` by default. Use a TLS reverse proxy or tunnel in front of it for any device testing; do not expose the DGX service directly to the public internet.
+The local service listens on `127.0.0.1:8791` by default. It requires authenticated HMAC uploads, validates the complete batch before storing it, rejects replayed timestamps outside five minutes, bounds both compressed and decompressed request bodies at 2 MB, and applies an in-process request rate limit.
 
 ```sh
-PYTHONPATH=src python -m unittest discover -s tests -v
-PYTHONPATH=src python -m canopy_contributor.process --root "$CANOPY_CONTRIBUTOR_ROOT"
+PYTHONPATH=src python3 -m unittest discover -s tests -v
+PYTHONPATH=src python3 -m canopy_contributor.process --root "$CANOPY_CONTRIBUTOR_ROOT"
+PYTHONPATH=src python3 -m canopy_contributor.cleanup --root "$CANOPY_CONTRIBUTOR_ROOT"
 ```
+
+The curator uses a durable SQLite ledger and deterministic per-batch JSONL files. Running it repeatedly or after a container restart does not duplicate outputs.
+
+## Storage layout
+
+The production host root is `/data/canopy/contributor_pipeline`, configurable as `CANOPY_HOST_STORAGE_ROOT`. The persistent Docker volume is bind-backed beneath that host path. The service creates:
+
+```text
+raw/         immutable compressed accepted uploads
+quarantine/  malformed or PII-suspect records awaiting review
+bronze/      schema-valid interaction records
+silver/      redacted and deduplicated records
+gold/        training candidates and frozen evaluation sets
+processed/   SQLite ledger, receipts, and cross-process locks
+deleted/      content-free deletion tombstones
+logs/        content-free retention audit records
+backups/     reserved for encrypted operator backups
+```
+
+Raw, bronze, silver, and quarantine records are never direct training inputs. Gold candidates require human review before export.
 
 ## Upload contract
 
-`POST /v1/contributor/batches` accepts either JSON or gzip-compressed JSON.
+`POST /v1/contributor/batches` accepts JSON or gzip-compressed JSON.
 
 Required headers:
 
@@ -47,9 +67,9 @@ X-Canopy-Timestamp: 2026-07-18T22:00:00Z
 X-Canopy-Signature: sha256=<hex-hmac-of-timestamp-dot-raw-request-body>
 ```
 
-The HMAC key is a beta-only secret provisioned outside the repository. The response contains a stable `receipt_id`; the client must delete a local batch only after receiving that receipt.
+The HMAC key is beta-only secret material provisioned outside the repository. The response contains a stable `receipt_id`; the client deletes its local batch only after receiving that receipt. Reusing a `batch_id` with different content returns a conflict.
 
-The body is versioned and idempotent:
+The body remains versioned and compatible with the existing iOS contract:
 
 ```json
 {
@@ -62,21 +82,38 @@ The body is versioned and idempotent:
 }
 ```
 
-See [`docs/IOS_INTEGRATION.md`](docs/IOS_INTEGRATION.md) for the app-side contract and signal rules.
+See [`docs/IOS_INTEGRATION.md`](docs/IOS_INTEGRATION.md) for the app-side signal rules.
 
-## Data lifecycle
+## Container deployment
 
-- `raw/` holds compressed, validated original batches. Treat it as restricted access.
-- `bronze/` holds parsed, schema-valid interaction candidates.
-- `silver/` holds redacted, deduplicated candidates.
-- `training/` is **not** populated unless an interaction contains an explicit tester correction. Review these before any fine-tuning run.
-- `eval/` holds deterministic control samples and frozen evaluation candidates.
-- `quarantine/` holds malformed, orphaned, or potentially unsafe records for review.
+Copy `.env.example` to an untracked local `.env`, replace the placeholders, and follow [`docs/OPERATIONS.md`](docs/OPERATIONS.md). Do not create or commit a populated `.env` in this repository.
 
-The redactor is intentionally conservative and only catches common email, telephone, payment-card, and IP-address patterns. It is a guardrail, not a substitute for human review or a mature PII detector.
+The default startup is:
 
-## Running it on the DGX
+```sh
+docker compose --env-file .env up --build -d
+```
 
-Use a dedicated Unix account and a restricted directory such as `/data/canopy-contributor`; set the root path through `CANOPY_CONTRIBUTOR_ROOT`. Put HTTPS authentication and rate limiting at the reverse proxy. Keep the service on a private network where possible.
+To include the outbound-only Cloudflare Tunnel connector:
 
-This module is not a cloud deployment script. Domain, TLS, secret provisioning, retention period, and a deletion-request workflow must be decided before accepting real contributor data.
+```sh
+docker compose --env-file .env --profile tunnel up --build -d
+```
+
+The public hostname is configured as `CANOPY_CONTRIBUTOR_DOMAIN=contributor-api.canopychat.app`. Replace the domain only in the local `.env` and in the Cloudflare Tunnel public-hostname configuration; do not alter the Canopy marketing site route.
+
+The stock Caddy image is used only as an internal HTTP reverse proxy for request limits, security headers, and upstream health checks. Application-level rate limiting remains enabled because stock Caddy has no rate-limit module. Add a Cloudflare WAF/rate-limit rule before accepting public beta traffic.
+
+## Deletion and retention
+
+Use the authenticated local deletion CLI, never a public HTTP endpoint:
+
+```sh
+PYTHONPATH=src python3 -m canopy_contributor.deletion \
+  --root /data/canopy/contributor_pipeline \
+  --installation-id INSTALLATION-UUID
+```
+
+The default retention policy is raw 30 days after successful processing, quarantine 7 days unless marked approved, and bronze/silver 90 days. Gold training candidates and frozen evaluations are retained until explicitly deleted. Change the four periods with the `CANOPY_*_RETENTION_DAYS` environment variables and run the cleanup command or let the scheduled retention service run.
+
+Regex redaction catches only common email, telephone, payment-card, and IP-address patterns. It is an automated guardrail, not a sufficient PII detector; candidates with replacements are quarantined by default for human review.

@@ -1,0 +1,31 @@
+:8080 {
+    # Cloudflare Tunnel is the only intended ingress. Caddy remains HTTP-only
+    # on the private Docker network; TLS terminates at Cloudflare.
+    request_body {
+        max_size 2MB
+    }
+
+    header {
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        Referrer-Policy no-referrer
+        -Server
+    }
+
+    @health path /health /ready
+    handle @health {
+        reverse_proxy ingest:8791 {
+            health_uri /ready
+            health_interval 30s
+            health_timeout 3s
+        }
+    }
+
+    handle {
+        reverse_proxy ingest:8791 {
+            health_uri /ready
+            health_interval 30s
+            health_timeout 3s
+        }
+    }
+}

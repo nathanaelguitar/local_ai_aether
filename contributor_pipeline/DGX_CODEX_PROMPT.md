@@ -46,7 +46,7 @@ Responses must preserve the current receipt shape:
 }
 ```
 
-The service currently accepts JSON and gzip JSON, validates schema version 1, has idempotent batch IDs, and stores JSONL datasets under `raw`, `bronze`, `silver`, `training`, `eval`, and `quarantine`.
+The service currently accepts JSON and gzip JSON, validates schema version 1, has idempotent batch IDs, and stores JSONL datasets under `raw`, `bronze`, `silver`, `gold`, and `quarantine`, with receipts and SQLite under `processed`.
 
 ## Required work
 
@@ -55,15 +55,16 @@ The service currently accepts JSON and gzip JSON, validates schema version 1, ha
    - Python 3.11+ slim base
    - run as a non-root user
    - no secrets baked into images or committed
-   - persistent bind mount or named volume at `/data/canopy-contributor`
+   - persistent bind-backed named volume at `/data/canopy/contributor_pipeline`
    - health check for `GET /health`
 3. Add a `docker-compose.yml` suitable for a single DGX Spark:
-   - ingestion service bound only to `127.0.0.1:8791` by default
+   - no host port publishing; access is through an outbound Cloudflare Tunnel and internal Caddy
    - a separate scheduled curator service/job that runs `python -m canopy_contributor.process` every 5–15 minutes
+   - a scheduled retention service with configurable raw/quarantine/bronze/silver periods
    - `.env.example`, never `.env`
    - resource/log rotation limits where practical
-4. Add a hardened reverse-proxy deployment option. Prefer Caddy if a domain and DNS are available:
-   - HTTPS only externally
+4. Add an internal Caddy reverse proxy behind a Cloudflare Tunnel for `contributor-api.canopychat.app`:
+   - HTTPS only externally at Cloudflare
    - request body limit no larger than 2 MB
    - rate limiting if the available Caddy setup supports it; otherwise document the limitation and use an upstream firewall/tunnel
    - do not expose the DGX directly on the public internet without the proxy/tunnel
@@ -85,7 +86,7 @@ The service currently accepts JSON and gzip JSON, validates schema version 1, ha
    - volume backup/restore
    - retention settings and secure deletion
    - how to use Caddy or a tunnel
-   - how to run tests and inspect quarantine/training candidates
+   - how to run tests and inspect quarantine/gold candidates
 8. Add tests for Docker-independent code, idempotency across restarts, replay rejection, gzip bodies, PII/quarantine behavior, processing-ledger idempotency, and deletion tooling.
 
 ## Credentials and enrollment
@@ -94,10 +95,10 @@ The initial local integration may use `CANOPY_CONTRIBUTOR_SHARED_SECRET`, but **
 
 ## Acceptance criteria
 
-- `docker compose up --build` brings up a localhost-only ingest endpoint and curator.
+- `docker compose up --build` brings up the internal ingest endpoint, curator, retention service, and Caddy; the optional tunnel connector provides the only external route.
 - A signed test batch produces exactly one raw batch and stable receipt across retries.
 - The same batch is not duplicated by repeated curator runs.
-- Failure-with-correction candidates reach `training/`; random controls reach `eval/`; unsafe/malformed records reach `quarantine/`.
+- Failure-with-correction candidates reach `gold/training/`; random controls reach `gold/eval/`; unsafe/malformed records reach `quarantine/`.
 - No prompts, responses, secrets, or HMAC signatures appear in logs.
 - The app-facing endpoint contract above remains compatible.
 
