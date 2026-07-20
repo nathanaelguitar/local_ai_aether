@@ -20,8 +20,7 @@ enum AetherModelCatalog {
     static let aetherV1ContextTokens: Int32 = 12288
     static let aetherV1BatchTokens: Int32 = 2048
     static let aetherV1ImageMaxTokens: Int32 = 768
-    // 512 tokens was an observable hard stop for longer answers.
-    static let aetherV1MaxOutputTokens: Int32 = 768
+    static let aetherV1MaxOutputTokens: Int32 = 1024
 
     static let aetherV1DownloadURL = URL(
         string: "https://huggingface.co/\(requestedGGUFRepository)/resolve/main/\(aetherV1GGUFFilename)"
