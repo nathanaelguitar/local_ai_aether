@@ -1,4 +1,5 @@
 import Foundation
+import NaturalLanguage
 
 #if canImport(LlamaSwift)
 import LlamaSwift
@@ -355,6 +356,13 @@ enum AetherPromptBuilder {
                 """
             }
             prompt += webSearchContext
+            // Search results may be in English even when the user wrote in another language.
+            // Injecting a reminder here (close to the generation point) overrides the
+            // English surface area and keeps the model responding in the user's language.
+            let latestUserText = messages.last(where: { $0.role == .user })?.content ?? ""
+            if let lang = Self.detectedNonEnglishLanguage(of: latestUserText) {
+                prompt += "\nSearch results above may be in a different language. You MUST reply in the same language the user wrote in (detected: \(lang)). Do not switch to English."
+            }
             prompt += "<|im_end|>\n"
         }
 
@@ -390,6 +398,16 @@ enum AetherPromptBuilder {
 
         prompt += "<|im_start|>assistant\n<think>\n</think>\n\n"
         return prompt
+    }
+
+    /// Returns the dominant BCP-47 language code of the text, or nil if undetermined / English.
+    private static func detectedNonEnglishLanguage(of text: String) -> String? {
+        let recognizer = NLLanguageRecognizer()
+        recognizer.processString(text)
+        guard let lang = recognizer.dominantLanguage,
+              lang != .undetermined,
+              lang != .english else { return nil }
+        return lang.rawValue
     }
 
     private static func currentDateString(date: Date = Date()) -> String {
