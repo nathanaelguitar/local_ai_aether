@@ -1,7 +1,14 @@
 """Sync GGUF from Hugging Face to Cloudflare R2.
 
-Run once before starting the server:
+Uploads the GGUF to an immutable versioned key, then atomically writes
+manifests/current.json so the Cloudflare Worker can serve it. The HF token
+is used only here; the Worker and iOS app never see it.
+
+Run once per release:
     python -m canopy_delivery.sync
+
+Re-running is safe: if manifest_meta.json already exists locally, the sync
+is skipped. Delete it to force a re-sync (e.g. after a bucket rebuild).
 """
 
 from __future__ import annotations
@@ -20,7 +27,6 @@ from .r2 import _r2_host, signed_put_headers
 
 log = logging.getLogger(__name__)
 
-
 _HF_TOKEN = os.environ["CANOPY_DELIVERY_HF_TOKEN"]
 _R2_ACCOUNT_ID = os.environ["CANOPY_DELIVERY_R2_ACCOUNT_ID"]
 _R2_ACCESS_KEY = os.environ["CANOPY_DELIVERY_R2_ACCESS_KEY_ID"]
@@ -33,14 +39,17 @@ _MODEL_VERSION = os.environ.get("CANOPY_DELIVERY_MODEL_VERSION", "1.1.2")
 _DATA_ROOT = Path(os.environ.get("CANOPY_DELIVERY_ROOT", "/data/canopy/model_delivery"))
 _CHUNK = 8 * 1024 * 1024  # 8 MB read chunks
 
+# Versioned, immutable object key. Releasing 1.1.3 writes a new key and never
+# overwrites this one — rollback is a manifest pointer change.
+def _model_r2_key(version: str, filename: str) -> str:
+    return f"models/canopy/{version}/{filename}"
+
 
 def _resolve_hf_url(hf_url: str) -> str:
     """Follow HF redirect to get the actual CDN download URL."""
     parsed = urllib.parse.urlparse(hf_url)
     conn = http.client.HTTPSConnection(parsed.netloc, timeout=30)
-    path = parsed.path
-    if parsed.query:
-        path += "?" + parsed.query
+    path = parsed.path + (f"?{parsed.query}" if parsed.query else "")
     conn.request("HEAD", path, headers={"Authorization": f"Bearer {_HF_TOKEN}"})
     resp = conn.getresponse()
     resp.read()
@@ -55,25 +64,16 @@ def _resolve_hf_url(hf_url: str) -> str:
 def _download_to_temp(url: str) -> tuple[Path, str, int]:
     """Stream URL to a temp file. Returns (path, sha256_hex, size_bytes)."""
     parsed = urllib.parse.urlparse(url)
-    host = parsed.netloc
-    path = parsed.path
-    if parsed.query:
-        path += "?" + parsed.query
-
-    conn = http.client.HTTPSConnection(host, timeout=300)
+    path = parsed.path + (f"?{parsed.query}" if parsed.query else "")
+    conn = http.client.HTTPSConnection(parsed.netloc, timeout=300)
     conn.request("GET", path)
     resp = conn.getresponse()
-
     if resp.status != 200:
-        raise RuntimeError(f"Download failed: HTTP {resp.status} from {url}")
-
+        raise RuntimeError(f"Download failed: HTTP {resp.status}")
     total = int(resp.getheader("Content-Length", "0"))
     hasher = hashlib.sha256()
     size = 0
-
-    tmp_dir = Path(tempfile.mkdtemp())
-    tmp_path = tmp_dir / _MODEL_FILENAME
-
+    tmp_path = Path(tempfile.mkdtemp()) / _MODEL_FILENAME
     log.info("Downloading %s (%.1f GB) ...", _MODEL_FILENAME, total / 1e9)
     with tmp_path.open("wb") as fh:
         while True:
@@ -83,17 +83,14 @@ def _download_to_temp(url: str) -> tuple[Path, str, int]:
             fh.write(chunk)
             hasher.update(chunk)
             size += len(chunk)
-            if total:
-                pct = size * 100 // total
-                if pct % 10 == 0:
-                    log.info("  %d%% (%d MB)", pct, size // 1_000_000)
-
+            if total and (size * 100 // total) % 10 == 0:
+                log.info("  %d%% (%d MB)", size * 100 // total, size // 1_000_000)
     conn.close()
     return tmp_path, hasher.hexdigest(), size
 
 
 def _put_to_r2(local_path: Path, key: str, size: int) -> None:
-    """Upload local_path to R2 using a single signed PUT."""
+    """Upload local_path to R2 at the given key using a single signed PUT."""
     host = _r2_host(_R2_ACCOUNT_ID)
     headers = signed_put_headers(
         account_id=_R2_ACCOUNT_ID,
@@ -104,15 +101,38 @@ def _put_to_r2(local_path: Path, key: str, size: int) -> None:
         content_length=size,
     )
     conn = http.client.HTTPSConnection(host, timeout=600)
-    log.info("Uploading %s to R2 (%.1f GB) ...", key, size / 1e9)
+    log.info("Uploading to R2: %s (%.1f GB) ...", key, size / 1e9)
     with local_path.open("rb") as fh:
         conn.request("PUT", f"/{_R2_BUCKET}/{key}", body=fh, headers=headers)
     resp = conn.getresponse()
     body = resp.read().decode(errors="replace")
     conn.close()
     if resp.status not in (200, 204):
-        raise RuntimeError(f"R2 PUT failed: HTTP {resp.status}: {body[:200]}")
+        raise RuntimeError(f"R2 PUT failed HTTP {resp.status}: {body[:200]}")
     log.info("R2 upload complete.")
+
+
+def _put_json_to_r2(payload: dict, key: str) -> None:
+    """Write a small JSON object to R2."""
+    data = json.dumps(payload, indent=2).encode()
+    host = _r2_host(_R2_ACCOUNT_ID)
+    headers = signed_put_headers(
+        account_id=_R2_ACCOUNT_ID,
+        access_key=_R2_ACCESS_KEY,
+        secret_key=_R2_SECRET_KEY,
+        bucket=_R2_BUCKET,
+        key=key,
+        content_length=len(data),
+        content_type="application/json",
+    )
+    import io
+    conn = http.client.HTTPSConnection(host, timeout=30)
+    conn.request("PUT", f"/{_R2_BUCKET}/{key}", body=io.BytesIO(data), headers=headers)
+    resp = conn.getresponse()
+    body = resp.read().decode(errors="replace")
+    conn.close()
+    if resp.status not in (200, 204):
+        raise RuntimeError(f"R2 JSON PUT failed HTTP {resp.status}: {body[:200]}")
 
 
 def main() -> None:
@@ -120,32 +140,40 @@ def main() -> None:
 
     meta_path = _DATA_ROOT / "manifest_meta.json"
     if meta_path.exists():
-        log.info("manifest_meta.json already present — skipping sync.")
+        log.info("manifest_meta.json already present — skipping sync. Delete it to re-run.")
         return
 
     _DATA_ROOT.mkdir(parents=True, exist_ok=True)
 
     hf_url = f"https://huggingface.co/{_HF_REPO}/resolve/main/{_MODEL_FILENAME}"
-    log.info("Resolving HF URL: %s", hf_url)
+    log.info("Resolving HF URL ...")
     cdn_url = _resolve_hf_url(hf_url)
-    log.info("CDN URL: %s", cdn_url[:80] + "...")
 
     tmp_path, sha256, size = _download_to_temp(cdn_url)
-    log.info("Downloaded: sha256=%s  size=%d", sha256, size)
+    log.info("Downloaded: sha256=%s  size=%d bytes", sha256, size)
 
-    _put_to_r2(tmp_path, _MODEL_FILENAME, size)
+    r2_key = _model_r2_key(_MODEL_VERSION, _MODEL_FILENAME)
+    _put_to_r2(tmp_path, r2_key, size)
+    tmp_path.unlink(missing_ok=True)
+    tmp_path.parent.rmdir()
 
     meta: dict = {
         "version": _MODEL_VERSION,
         "filename": _MODEL_FILENAME,
         "size_bytes": size,
         "sha256": sha256,
+        "key": r2_key,
     }
-    meta_path.write_text(json.dumps(meta, indent=2))
-    log.info("manifest_meta.json written.")
 
-    tmp_path.unlink(missing_ok=True)
-    tmp_path.parent.rmdir()
+    # Write manifests/current.json to R2 — this is what the Cloudflare Worker reads.
+    # Do this last so the Worker only serves the new manifest once the model is confirmed uploaded.
+    log.info("Writing manifests/current.json to R2 ...")
+    _put_json_to_r2(meta, "manifests/current.json")
+    log.info("manifests/current.json written.")
+
+    # Cache locally so re-runs skip the sync.
+    meta_path.write_text(json.dumps(meta, indent=2))
+    log.info("Sync complete. Model delivery is live.")
 
 
 if __name__ == "__main__":

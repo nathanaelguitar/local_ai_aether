@@ -1,0 +1,30 @@
+name = "canopy-model-delivery"
+main = "src/index.ts"
+compatibility_date = "2025-07-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Secrets (set via `wrangler secret put <NAME>`):
+#   R2_ACCOUNT_ID        - Cloudflare account ID
+#   R2_ACCESS_KEY_ID     - R2 S3-API access key (Object Read on this bucket only)
+#   R2_SECRET_ACCESS_KEY - R2 S3-API secret key
+#   R2_BUCKET_NAME       - R2 bucket name
+#   ADMIN_SECRET         - Bearer token for /admin/tokens/revoke
+
+[vars]
+ENVIRONMENT = "contributor"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "canopy-model-delivery"
+database_id = "REPLACE_AFTER_wrangler_d1_create"
+
+[[r2_buckets]]
+binding = "MODEL_BUCKET"
+bucket_name = "REPLACE_WITH_YOUR_BUCKET_NAME"
+preview_bucket_name = "canopy-model-delivery-preview"
+
+[routes]
+# Bind to your contributor subdomain. Activate via:
+#   wrangler deploy
+# Route is set in the Cloudflare dashboard under Workers & Pages > canopy-model-delivery > Triggers.
+# Pattern: model-api.canopychat.app/*
