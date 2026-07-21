@@ -222,6 +222,27 @@ enum AetherActiveModelVersion {
     }
 }
 
+/// Native at-rest protection for large on-device model artifacts. This relies on
+/// iOS Data Protection instead of a custom GGUF cipher: llama.cpp needs usable
+/// local weights, while iOS can encrypt those files with device-bound keys.
+enum AetherModelFileProtection {
+    private static let protection = FileProtectionType.completeUntilFirstUserAuthentication
+
+    static func apply(to url: URL) throws {
+        try FileManager.default.setAttributes(
+            [.protectionKey: protection],
+            ofItemAtPath: url.path
+        )
+    }
+
+    static func excludeFromBackup(_ directory: URL) throws {
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        var directory = directory
+        try directory.setResourceValues(values)
+    }
+}
+
 /// A URL-free record of the last fully verified private model. Signed R2 URLs
 /// are bearer credentials with a short lifetime, so they are intentionally not
 /// persisted. This record lets the app keep using the verified on-device model
@@ -288,6 +309,7 @@ enum AetherPrivateModelCache {
         )
         let directory = base.appendingPathComponent("Models", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try AetherModelFileProtection.excludeFromBackup(directory)
         return directory.appendingPathComponent(filename)
     }
 }
@@ -492,6 +514,7 @@ final class AetherRangeFileDownloader: NSObject, URLSessionDataDelegate, URLSess
                 try? FileManager.default.removeItem(at: destination)
                 FileManager.default.createFile(atPath: destination.path, contents: nil)
             }
+            try AetherModelFileProtection.apply(to: destination)
             let handle = try FileHandle(forWritingTo: destination)
             if shouldAppend {
                 try handle.seekToEnd()

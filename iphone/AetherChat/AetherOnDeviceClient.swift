@@ -377,6 +377,7 @@ enum AetherModelStore {
         try? FileManager.default.removeItem(at: destination)
         do {
             try FileManager.default.moveItem(at: temporaryURL, to: destination)
+            try AetherModelFileProtection.apply(to: destination)
             return destination
         } catch {
             throw AetherOnDeviceError.modelDownloadFailed(error.localizedDescription)
@@ -423,9 +424,13 @@ enum AetherModelStore {
                 await status?("Verifying \(label)")
                 try? FileManager.default.removeItem(at: destination)
                 try FileManager.default.moveItem(at: partialURL, to: destination)
+                try AetherModelFileProtection.apply(to: destination)
                 let receipt = VerifiedFileReceipt(sizeBytes: currentFile.sizeBytes, sha256: currentFile.sha256.lowercased())
                 let receiptData = try JSONEncoder().encode(receipt)
-                try receiptData.write(to: receiptURL, options: .atomic)
+                try receiptData.write(
+                    to: receiptURL,
+                    options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
+                )
                 return destination
             } catch let error as AetherModelDownloadError {
                 guard attempt < 2 else {
@@ -525,6 +530,7 @@ enum AetherModelStore {
         )
         let directory = base.appendingPathComponent("Models", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try AetherModelFileProtection.excludeFromBackup(directory)
         return directory
     }
 }
