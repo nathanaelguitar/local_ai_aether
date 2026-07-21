@@ -202,9 +202,37 @@ enum AetherModelStore {
     }
 
     static func localAetherV1Files(status: AetherOnDeviceClient.StatusHandler? = nil) async throws -> AetherV1Files {
-        if let manifest = try await AetherPrivateModelDelivery.shared.manifestIfConfigured() {
-            return try await privateModelFiles(manifest: manifest, status: status)
+        let delivery = AetherPrivateModelDelivery.shared
+        if AetherBuildChannel.isContributor {
+            let cachedModel = await delivery.cachedModel()
+            if let cachedModel,
+               !(await delivery.shouldRefresh(cachedModel)),
+               let files = try? cachedPrivateModelFiles(cachedModel) {
+                return files
+            }
+
+            do {
+                guard let manifest = try await delivery.manifestIfConfigured() else {
+                    if let cachedModel, let files = try? cachedPrivateModelFiles(cachedModel) {
+                        return files
+                    }
+                    throw AetherModelDeliveryError.unavailable
+                }
+                let files = try await privateModelFiles(manifest: manifest, status: status)
+                await delivery.activate(manifest)
+                return files
+            } catch {
+                // A previously activated, hash-verified model must remain usable
+                // offline. Network availability is needed only for a first install
+                // or checking for a later model version.
+                if let cachedModel, let files = try? cachedPrivateModelFiles(cachedModel) {
+                    await status?("Using downloaded Canopy \(cachedModel.version)")
+                    return files
+                }
+                throw error
+            }
         }
+
         let directory = try modelDirectory()
         return AetherV1Files(
             modelURL: try await localFile(
@@ -270,7 +298,49 @@ enum AetherModelStore {
                 status: status
             )
         }
+        let files = AetherV1Files(modelURL: modelURL, mmprojURL: mmprojURL)
+        return files
+    }
+
+    private static func cachedPrivateModelFiles(_ cached: AetherCachedPrivateModel) throws -> AetherV1Files {
+        let root = try modelDirectory()
+        let versionedDirectory = root
+            .appendingPathComponent(safePathComponent(cached.modelID), isDirectory: true)
+            .appendingPathComponent(safePathComponent(cached.version), isDirectory: true)
+
+        guard let model = cached.file(role: "model") else {
+            throw AetherModelDeliveryError.invalidManifest("The cached model record is incomplete.")
+        }
+        let modelURL = try verifiedCachedPrivateFile(model, directory: versionedDirectory)
+
+        let mmprojURL: URL
+        if let projector = cached.file(role: "projector") {
+            mmprojURL = try verifiedCachedPrivateFile(projector, directory: versionedDirectory)
+        } else {
+            let legacyProjector = root.appendingPathComponent(AetherModelCatalog.aetherV1MMProjFilename)
+            guard FileManager.default.fileExists(atPath: legacyProjector.path) else {
+                throw AetherModelDeliveryError.downloadFailed("The vision projector must be downloaded once while online.")
+            }
+            mmprojURL = legacyProjector
+        }
         return AetherV1Files(modelURL: modelURL, mmprojURL: mmprojURL)
+    }
+
+    private static func verifiedCachedPrivateFile(
+        _ file: AetherCachedPrivateModel.File,
+        directory: URL
+    ) throws -> URL {
+        let destination = directory.appendingPathComponent(file.filename)
+        let receiptURL = destination.appendingPathExtension("receipt.json")
+        guard isVerifiedCachedFile(
+            destination: destination,
+            receiptURL: receiptURL,
+            expectedSize: file.sizeBytes,
+            expectedSHA256: file.sha256
+        ) else {
+            throw AetherModelDeliveryError.integrityFailed("The cached \(file.role) file is incomplete or invalid.")
+        }
+        return destination
     }
 
     private static func localFile(
@@ -327,7 +397,12 @@ enum AetherModelStore {
     ) async throws -> URL {
         let destination = directory.appendingPathComponent(file.filename)
         let receiptURL = destination.appendingPathExtension("receipt.json")
-        if isVerifiedCachedFile(destination: destination, receiptURL: receiptURL, expected: file) {
+        if isVerifiedCachedFile(
+            destination: destination,
+            receiptURL: receiptURL,
+            expectedSize: file.sizeBytes,
+            expectedSHA256: file.sha256
+        ) {
             return destination
         }
 
@@ -388,16 +463,17 @@ enum AetherModelStore {
     private static func isVerifiedCachedFile(
         destination: URL,
         receiptURL: URL,
-        expected: AetherModelManifest.File
+        expectedSize: Int64,
+        expectedSHA256: String
     ) -> Bool {
         guard FileManager.default.fileExists(atPath: destination.path),
-              fileSize(at: destination) == expected.sizeBytes,
+              fileSize(at: destination) == expectedSize,
               let data = try? Data(contentsOf: receiptURL),
               let receipt = try? JSONDecoder().decode(VerifiedFileReceipt.self, from: data) else {
             return false
         }
-        return receipt.sizeBytes == expected.sizeBytes &&
-            receipt.sha256.caseInsensitiveCompare(expected.sha256) == .orderedSame
+        return receipt.sizeBytes == expectedSize &&
+            receipt.sha256.caseInsensitiveCompare(expectedSHA256) == .orderedSame
     }
 
     private static func verifyDownloadedFile(at url: URL, expected: AetherModelManifest.File) throws {

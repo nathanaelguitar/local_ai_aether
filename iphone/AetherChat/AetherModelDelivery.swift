@@ -222,6 +222,76 @@ enum AetherActiveModelVersion {
     }
 }
 
+/// A URL-free record of the last fully verified private model. Signed R2 URLs
+/// are bearer credentials with a short lifetime, so they are intentionally not
+/// persisted. This record lets the app keep using the verified on-device model
+/// while offline or while the manifest service is temporarily unavailable.
+struct AetherCachedPrivateModel: Codable, Sendable {
+    struct File: Codable, Sendable {
+        let role: String
+        let filename: String
+        let sizeBytes: Int64
+        let sha256: String
+    }
+
+    let modelID: String
+    let version: String
+    let files: [File]
+    let activatedAt: Date
+
+    func file(role: String) -> File? {
+        files.first { $0.role.caseInsensitiveCompare(role) == .orderedSame }
+    }
+
+    static func from(_ manifest: AetherModelManifest) -> Self {
+        Self(
+            modelID: manifest.model.id,
+            version: manifest.model.version,
+            files: manifest.model.files.map {
+                File(role: $0.role, filename: $0.filename, sizeBytes: $0.sizeBytes, sha256: $0.sha256)
+            },
+            activatedAt: Date()
+        )
+    }
+}
+
+enum AetherPrivateModelCache {
+    private static let filename = "active-private-model.json"
+    private static let manifestRefreshInterval: TimeInterval = 60 * 60 * 12
+
+    static func load() -> AetherCachedPrivateModel? {
+        guard let url = try? cacheURL(),
+              let data = try? Data(contentsOf: url) else { return nil }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try? decoder.decode(AetherCachedPrivateModel.self, from: data)
+    }
+
+    static func save(_ manifest: AetherModelManifest) {
+        guard let url = try? cacheURL() else { return }
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        guard let data = try? encoder.encode(AetherCachedPrivateModel.from(manifest)) else { return }
+        try? data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+    }
+
+    static func shouldRefresh(_ cached: AetherCachedPrivateModel, now: Date = Date()) -> Bool {
+        now.timeIntervalSince(cached.activatedAt) >= manifestRefreshInterval
+    }
+
+    private static func cacheURL() throws -> URL {
+        let base = try FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )
+        let directory = base.appendingPathComponent("Models", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory.appendingPathComponent(filename)
+    }
+}
+
 actor AetherPrivateModelDelivery {
     static let shared = AetherPrivateModelDelivery()
 
@@ -258,6 +328,19 @@ actor AetherPrivateModelDelivery {
         return try await manifest()
     }
 
+    func cachedModel() -> AetherCachedPrivateModel? {
+        AetherPrivateModelCache.load()
+    }
+
+    func shouldRefresh(_ cached: AetherCachedPrivateModel) -> Bool {
+        AetherPrivateModelCache.shouldRefresh(cached)
+    }
+
+    func activate(_ manifest: AetherModelManifest) {
+        AetherPrivateModelCache.save(manifest)
+        AetherActiveModelVersion.set(manifest.model.version)
+    }
+
     func manifest() async throws -> AetherModelManifest {
         guard let configuration = AetherModelDeliveryConfiguration.current else {
             throw AetherModelDeliveryError.unavailable
@@ -291,7 +374,6 @@ actor AetherPrivateModelDelivery {
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
             let manifest = try decoder.decode(AetherModelManifest.self, from: data).validated()
-            AetherActiveModelVersion.set(manifest.model.version)
             return manifest
         } catch let error as AetherModelDeliveryError {
             throw error

@@ -2,6 +2,22 @@ import XCTest
 @testable import AetherChat
 
 final class AetherModelDeliveryTests: XCTestCase {
+    func testVerifiedModelRefreshesOnlyAfterTwelveHours() {
+        let now = Date()
+        let cached = AetherCachedPrivateModel(
+            modelID: "canopy",
+            version: "1.1.2",
+            files: [],
+            activatedAt: now.addingTimeInterval(-(60 * 60 * 11))
+        )
+
+        XCTAssertFalse(AetherPrivateModelCache.shouldRefresh(cached, now: now))
+        XCTAssertTrue(AetherPrivateModelCache.shouldRefresh(
+            cached,
+            now: now.addingTimeInterval(60 * 60 * 2)
+        ))
+    }
+
     func testDeployedFlatManifestNormalizesToModelFile() throws {
         let manifest = try decodeManifest("""
         {
