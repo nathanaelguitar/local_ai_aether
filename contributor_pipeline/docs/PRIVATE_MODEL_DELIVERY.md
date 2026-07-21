@@ -1,133 +1,71 @@
-# Private model delivery contract
+# Private model delivery: iOS handoff
 
-This document is the contract between the CanopyChat contributor iOS build and
-the private model-delivery service. It is deliberately separate from contributor
-telemetry: a model download must never expose a Hugging Face credential to the
-app, and telemetry consent must not control whether a contributor can install the
-model assigned to their build.
+The authoritative service contract and deployment runbook are in
+[`docs/MODEL_DELIVERY_API.md`](../../docs/MODEL_DELIVERY_API.md). This document
+records the iOS-side guarantees and the exact build settings needed to enable it.
 
 ## Security boundary
 
-- The Hugging Face read token lives only on the delivery service or DGX sync job.
-  Never place it in the iOS app, Xcode build settings, Git, or a client-visible
-  manifest.
-- The service mirrors the approved private GGUF files to private object storage.
-  The service returns short-lived HTTPS object URLs; it must not proxy multi-GB
-  files through the API process.
-- The current installation token is an opaque contributor-install credential, not
-  an account identifier and not a Hugging Face token. It is stored in the iOS
-  Keychain with `AfterFirstUnlockThisDeviceOnly` accessibility.
-- This endpoint is compiled into the Contributor Beta configuration only. A
-  production configuration leaves both endpoint settings blank and therefore
-  continues using its production model path.
+- The Hugging Face read token stays only in the DGX sync environment. It must
+  never be placed in iOS source, `Info.plist`, Xcode Cloud, Git, telemetry, or a
+  client-visible manifest.
+- GGUF bytes are mirrored from the private Hugging Face repository into private
+  R2 storage. The delivery API returns only a short-lived R2 signed URL.
+- The contributor app stores an opaque per-install bearer token in the Keychain.
+  It is not a Hugging Face credential and is never sent to R2.
+- The app writes a resumable `.partial` download, checks the exact byte count and
+  SHA-256 from the manifest, and only then atomically activates the model.
 
-## iOS build settings
+## Contributor Beta build settings
 
-Set these **Contributor Beta** build settings after the service is deployed:
+Set these only for the `AetherChatBeta` / Contributor Beta configuration after
+the Cloudflare Tunnel is live:
 
 ```text
-AETHER_MODEL_REGISTRATION_ENDPOINT = https://models.canopychat.app/v1/contributor/installations
-AETHER_MODEL_MANIFEST_ENDPOINT = https://models.canopychat.app/v1/model-manifest
+AETHER_MODEL_REGISTRATION_ENDPOINT = https://model-api.canopychat.app/v1/tokens
+AETHER_MODEL_MANIFEST_ENDPOINT = https://model-api.canopychat.app/v1/model-manifest
 ```
 
-Do not configure credentials in either setting. The iOS client treats an empty,
-non-HTTPS, or missing pair as disabled.
+The endpoints are not secrets. Leave both settings blank in the production
+configuration. An absent, non-HTTPS, or incomplete pair disables private model
+delivery rather than falling back to an unverified private-model download.
 
-## 1. Register an installation
+## Wire compatibility implemented in iOS
 
-```http
-POST /v1/contributor/installations
-Content-Type: application/json
+Registration uses:
+
+```json
+POST /v1/tokens
+{ "install_id": "random-keychain-persisted-uuid" }
 ```
+
+The app accepts the service response `{ "token": "..." }` and stores that
+opaque token in Keychain. A manifest call uses `Authorization: Bearer <token>`.
+
+The deployed service's flat response:
 
 ```json
 {
-  "schema_version": 1,
-  "installation_id": "random-keychain-persisted-uuid",
-  "app_version": "1.1.1 (18)",
-  "build_channel": "contributor"
+  "version": "1.1.2",
+  "filename": "canopy-1.1.2.Q4_K_M.gguf",
+  "size_bytes": 1274818816,
+  "sha256": "64-character-lowercase-hex",
+  "download_url": "https://...signed-r2-url...",
+  "url_expires_at": "2026-07-20T13:15:00Z"
 }
 ```
 
-Return a random opaque credential with at least 24 characters:
+is normalized internally into a versioned manifest. The client also accepts the
+earlier nested form to keep the app transport implementation forwards-compatible.
+On an expired signed URL (`401`/`403`), it requests a fresh manifest and resumes
+with `Range: bytes=<partial-size>-`.
 
-```json
-{ "installation_token": "opaque-random-install-token" }
-```
+## Remaining enrollment hardening
 
-The service must be prepared to return the same or a rotated token when an
-existing installation registers again. Future versions should bind enrollment to
-TestFlight/invite validation and App Attest; do not use device identifiers.
-
-## 2. Request the assigned immutable model manifest
-
-```http
-GET /v1/model-manifest
-Authorization: Bearer <installation_token>
-X-Canopy-Installation-ID: <random-installation-uuid>
-X-Canopy-App-Version: 1.1.1 (18)
-```
-
-Successful response (`200`):
-
-```json
-{
-  "schema_version": 1,
-  "model": {
-    "id": "canopy",
-    "version": "1.1.2",
-    "files": [
-      {
-        "role": "model",
-        "filename": "canopy-1.1.2.Q4_K_M.gguf",
-        "download_url": "https://private-bucket.example/...short-lived-signature...",
-        "size_bytes": 1876543210,
-        "sha256": "lowercase-64-character-sha256-hex",
-        "expires_at": "2026-07-21T00:00:00Z"
-      },
-      {
-        "role": "projector",
-        "filename": "canopy-1.1.2.mmproj-Q8_0.gguf",
-        "download_url": "https://private-bucket.example/...short-lived-signature...",
-        "size_bytes": 123456789,
-        "sha256": "lowercase-64-character-sha256-hex",
-        "expires_at": "2026-07-21T00:00:00Z"
-      }
-    ]
-  }
-}
-```
-
-`role: "model"` is required. `role: "projector"` is optional only while the
-current Canopy projector remains compatible; publish it whenever the model needs
-a matching projector. Model IDs and versions must be immutable. Do not swap a
-different file under the same `(id, version)`.
-
-## Download behavior
-
-- Every `download_url` must be HTTPS and refer to exactly the filename, byte
-  count, and SHA-256 advertised in the manifest.
-- Object storage must support `Range: bytes=<offset>-`. The iOS client writes a
-  `.partial` file, resumes after app suspension, validates the exact byte count
-  and SHA-256, then atomically activates the file.
-- A download URL may expire. On `401` or `403`, the app obtains a fresh manifest
-  and resumes the same immutable file. The fresh manifest must preserve the same
-  model ID/version and file identity for an in-progress download.
-- Return `401` or `403` from the manifest endpoint for invalid/revoked
-  credentials. The app deletes its credential and registers once more.
-- Signed URLs should be long enough for a normal Wi-Fi download, but expiration
-  is safe because the client refreshes and resumes.
-
-## Operational flow
-
-```text
-Private Hugging Face repository
-  -> DGX/service sync (HF token stays here)
-  -> private object storage
-  -> authenticated manifest with signed URLs
-  -> contributor iPhone verifies SHA-256 before activation
-```
-
-Log only request IDs, installation-token hashes, model IDs/versions, status
-codes, and byte counts. Never log GGUF URLs with signatures, Hugging Face
-credentials, request Authorization headers, prompts, or conversation data.
+An endpoint that issues a token to any caller is a delivery mechanism, not a
+strong authorization boundary: a determined person with the beta binary can
+register an installation. Before broad external distribution, bind
+`POST /v1/tokens` to a real contributor enrollment check (for example a
+server-issued invite credential plus App Attest), add token revocation/rate
+limits, and avoid logging bearer values. This does not require exposing any
+Hugging Face credential to the app.

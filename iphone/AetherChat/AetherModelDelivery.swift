@@ -33,9 +33,46 @@ struct AetherModelManifest: Decodable, Sendable {
     let schemaVersion: Int
     let model: Model
 
-    enum CodingKeys: String, CodingKey {
+    private enum CodingKeys: String, CodingKey {
         case schemaVersion = "schema_version"
         case model
+    }
+
+    private enum FlatCodingKeys: String, CodingKey {
+        case version
+        case filename
+        case downloadURL = "download_url"
+        case sizeBytes = "size_bytes"
+        case sha256
+        case expiresAt = "url_expires_at"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        if container.contains(.model) {
+            schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
+            model = try container.decode(Model.self, forKey: .model)
+            return
+        }
+
+        // The deployed delivery service uses a deliberately compact flat
+        // response. Normalize it immediately so the downloader has one trusted
+        // internal manifest shape regardless of the wire representation.
+        let flat = try decoder.container(keyedBy: FlatCodingKeys.self)
+        let file = File(
+            role: "model",
+            filename: try flat.decode(String.self, forKey: .filename),
+            downloadURL: try flat.decode(URL.self, forKey: .downloadURL),
+            sizeBytes: try flat.decode(Int64.self, forKey: .sizeBytes),
+            sha256: try flat.decode(String.self, forKey: .sha256),
+            expiresAt: try flat.decodeIfPresent(Date.self, forKey: .expiresAt)
+        )
+        schemaVersion = 1
+        model = Model(
+            id: "canopy",
+            version: try flat.decode(String.self, forKey: .version),
+            files: [file]
+        )
     }
 
     func validated() throws -> Self {
@@ -189,22 +226,26 @@ actor AetherPrivateModelDelivery {
     static let shared = AetherPrivateModelDelivery()
 
     private struct RegistrationRequest: Encodable {
-        let schemaVersion = 1
         let installationID: String
-        let appVersion: String
-        let buildChannel: String
 
         enum CodingKeys: String, CodingKey {
-            case schemaVersion = "schema_version"
-            case installationID = "installation_id"
-            case appVersion = "app_version"
-            case buildChannel = "build_channel"
+            case installationID = "install_id"
         }
     }
 
     private struct RegistrationResponse: Decodable {
         let installationToken: String
-        enum CodingKeys: String, CodingKey { case installationToken = "installation_token" }
+
+        private enum CodingKeys: String, CodingKey {
+            case installationToken = "installation_token"
+            case token
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            installationToken = try container.decodeIfPresent(String.self, forKey: .installationToken)
+                ?? container.decode(String.self, forKey: .token)
+        }
     }
 
     private let tokenAccount = "installation-token"
@@ -271,11 +312,7 @@ actor AetherPrivateModelDelivery {
         request.timeoutInterval = 30
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(
-            RegistrationRequest(
-                installationID: installationID,
-                appVersion: appVersion,
-                buildChannel: AetherBuildChannel.name
-            )
+            RegistrationRequest(installationID: installationID)
         )
 
         do {
