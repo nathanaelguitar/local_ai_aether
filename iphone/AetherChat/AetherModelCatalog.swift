@@ -14,6 +14,7 @@ enum AetherModelCatalog {
     static let requestedGGUFRepository = "nathanaelguitar/canopy-1.1.2"
     static let requestedGGUFQuantization = "Q4_K_M"
     static let aetherV1GGUFFilename = "canopy-1.1.2.Q4_K_M.gguf"
+    static let aetherV1MMProjRepository = "mradermacher/Qwen3.5-2b-Kimi-and-Opus-Distillation-GGUF"
     static let aetherV1MMProjFilename = "Qwen3.5-2b-Kimi-and-Opus-Distillation.mmproj-Q8_0.gguf"
     // A 20k KV cache is expensive on an iPhone and is rarely needed because the
     // prompt builder already degrades older turns and attachments.
@@ -27,7 +28,7 @@ enum AetherModelCatalog {
     )!
 
     static let aetherV1MMProjDownloadURL = URL(
-        string: "https://huggingface.co/\(requestedGGUFRepository)/resolve/main/\(aetherV1MMProjFilename)"
+        string: "https://huggingface.co/\(aetherV1MMProjRepository)/resolve/main/\(aetherV1MMProjFilename)"
     )!
 
     static var aetherV1RuntimeMessage: String {
