@@ -67,7 +67,11 @@ struct SettingsView: View {
                         // AI config
                         SettingsSection(title: "AI Configuration") {
                             VStack(spacing: 0) {
-                                SettingsInfoRow(icon: "cpu", title: "Model", subtitle: AetherModelCatalog.aetherV1DisplayName)
+                                SettingsInfoRow(
+                                    icon: "cpu",
+                                    title: "Model",
+                                    subtitle: "\(AetherModelCatalog.aetherV1DisplayName) · v\(AetherActiveModelVersion.current)"
+                                )
                                 Divider().padding(.leading, 56)
                                 SettingsInfoRow(icon: "iphone.gen3", title: "Inference", subtitle: "On device")
                                 Divider().padding(.leading, 56)

@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import NaturalLanguage
 
@@ -13,6 +14,8 @@ struct AetherGeneratedReply: Sendable {
 actor AetherOnDeviceClient {
     #if canImport(LlamaSwift)
     private var engine: AetherLlamaEngine?
+    private var loadedModelURL: URL?
+    private var loadedMMProjURL: URL?
     #endif
 
     typealias StatusHandler = @Sendable (String?) async -> Void
@@ -112,17 +115,22 @@ actor AetherOnDeviceClient {
 
     #if canImport(LlamaSwift)
     private func loadEngine(modelURL: URL, mmprojURL: URL) throws -> AetherLlamaEngine {
-        if let engine {
+        if let engine, loadedModelURL == modelURL, loadedMMProjURL == mmprojURL {
             return engine
         }
+        engine = nil
         let engine = try AetherLlamaEngine(modelURL: modelURL, mmprojURL: mmprojURL)
         self.engine = engine
+        loadedModelURL = modelURL
+        loadedMMProjURL = mmprojURL
         return engine
     }
 
     private func resetEngineIfNeeded(after error: Error) {
         guard Self.canRetry(after: error) else { return }
         engine = nil
+        loadedModelURL = nil
+        loadedMMProjURL = nil
     }
 
     private static func canRetry(after error: Error) -> Bool {
@@ -194,6 +202,9 @@ enum AetherModelStore {
     }
 
     static func localAetherV1Files(status: AetherOnDeviceClient.StatusHandler? = nil) async throws -> AetherV1Files {
+        if let manifest = try await AetherPrivateModelDelivery.shared.manifestIfConfigured() {
+            return try await privateModelFiles(manifest: manifest, status: status)
+        }
         let directory = try modelDirectory()
         return AetherV1Files(
             modelURL: try await localFile(
@@ -211,6 +222,55 @@ enum AetherModelStore {
                 status: status
             )
         )
+    }
+
+    /// Contributor builds use this route only when the delivery endpoints are set.
+    /// The manifest supplies opaque, expiring object-storage URLs, never a Hugging
+    /// Face credential or an enduring private-model URL.
+    private static func privateModelFiles(
+        manifest: AetherModelManifest,
+        status: AetherOnDeviceClient.StatusHandler?
+    ) async throws -> AetherV1Files {
+        let root = try modelDirectory()
+        let versionedDirectory = root
+            .appendingPathComponent(safePathComponent(manifest.model.id), isDirectory: true)
+            .appendingPathComponent(safePathComponent(manifest.model.version), isDirectory: true)
+        try FileManager.default.createDirectory(at: versionedDirectory, withIntermediateDirectories: true)
+
+        guard let modelFile = manifest.file(role: "model") else {
+            throw AetherModelDeliveryError.invalidManifest("The language-model file is missing.")
+        }
+        let modelURL = try await localPrivateFile(
+            manifest: manifest,
+            file: modelFile,
+            directory: versionedDirectory,
+            label: "Canopy \(manifest.model.version) language model",
+            status: status
+        )
+
+        // The new model endpoint should provide a projector too. Keeping this
+        // fallback lets a text-weight-only rollout remain compatible with the
+        // existing public projector while the private service is being populated.
+        let mmprojURL: URL
+        if let projector = manifest.file(role: "projector") {
+            mmprojURL = try await localPrivateFile(
+                manifest: manifest,
+                file: projector,
+                directory: versionedDirectory,
+                label: "Canopy \(manifest.model.version) vision projector",
+                status: status
+            )
+        } else {
+            let legacyDirectory = try modelDirectory()
+            mmprojURL = try await localFile(
+                directory: legacyDirectory,
+                filename: AetherModelCatalog.aetherV1MMProjFilename,
+                remoteURL: AetherModelCatalog.aetherV1MMProjDownloadURL,
+                label: "Canopy V1 vision projector",
+                status: status
+            )
+        }
+        return AetherV1Files(modelURL: modelURL, mmprojURL: mmprojURL)
     }
 
     private static func localFile(
@@ -250,6 +310,133 @@ enum AetherModelStore {
             return destination
         } catch {
             throw AetherOnDeviceError.modelDownloadFailed(error.localizedDescription)
+        }
+    }
+
+    private struct VerifiedFileReceipt: Codable {
+        let sizeBytes: Int64
+        let sha256: String
+    }
+
+    private static func localPrivateFile(
+        manifest: AetherModelManifest,
+        file: AetherModelManifest.File,
+        directory: URL,
+        label: String,
+        status: AetherOnDeviceClient.StatusHandler?
+    ) async throws -> URL {
+        let destination = directory.appendingPathComponent(file.filename)
+        let receiptURL = destination.appendingPathExtension("receipt.json")
+        if isVerifiedCachedFile(destination: destination, receiptURL: receiptURL, expected: file) {
+            return destination
+        }
+
+        let partialURL = destination.appendingPathExtension("partial")
+        var currentFile = file
+        for attempt in 0..<3 {
+            await status?("Downloading \(label)\(attempt == 0 ? "" : " (resuming)")")
+            var request = URLRequest(url: currentFile.downloadURL)
+            request.timeoutInterval = 90
+            let partialSize = fileSize(at: partialURL)
+            if partialSize > 0 {
+                request.setValue("bytes=\(partialSize)-", forHTTPHeaderField: "Range")
+            }
+
+            do {
+                try await AetherRangeFileDownloader().download(request: request, to: partialURL)
+                try verifyDownloadedFile(at: partialURL, expected: currentFile)
+                await status?("Verifying \(label)")
+                try? FileManager.default.removeItem(at: destination)
+                try FileManager.default.moveItem(at: partialURL, to: destination)
+                let receipt = VerifiedFileReceipt(sizeBytes: currentFile.sizeBytes, sha256: currentFile.sha256.lowercased())
+                let receiptData = try JSONEncoder().encode(receipt)
+                try receiptData.write(to: receiptURL, options: .atomic)
+                return destination
+            } catch let error as AetherModelDownloadError {
+                guard attempt < 2 else {
+                    throw AetherModelDeliveryError.downloadFailed(downloadErrorDescription(error))
+                }
+                if case .httpStatus(let statusCode) = error, statusCode != 401, statusCode != 403, statusCode < 500 {
+                    throw AetherModelDeliveryError.downloadFailed(downloadErrorDescription(error))
+                }
+                currentFile = try await refreshedFile(role: file.role, matching: manifest)
+            } catch let error as AetherModelDeliveryError {
+                if case .integrityFailed = error {
+                    try? FileManager.default.removeItem(at: partialURL)
+                }
+                guard attempt < 2 else { throw error }
+                currentFile = try await refreshedFile(role: file.role, matching: manifest)
+            } catch {
+                guard attempt < 2 else {
+                    throw AetherModelDeliveryError.downloadFailed(error.localizedDescription)
+                }
+                currentFile = try await refreshedFile(role: file.role, matching: manifest)
+            }
+        }
+        throw AetherModelDeliveryError.downloadFailed("The download could not be resumed.")
+    }
+
+    private static func refreshedFile(role: String, matching manifest: AetherModelManifest) async throws -> AetherModelManifest.File {
+        let refreshed = try await AetherPrivateModelDelivery.shared.manifest()
+        guard refreshed.model.id == manifest.model.id, refreshed.model.version == manifest.model.version,
+              let file = refreshed.file(role: role) else {
+            throw AetherModelDeliveryError.invalidManifest("The model changed while its files were downloading.")
+        }
+        return file
+    }
+
+    private static func isVerifiedCachedFile(
+        destination: URL,
+        receiptURL: URL,
+        expected: AetherModelManifest.File
+    ) -> Bool {
+        guard FileManager.default.fileExists(atPath: destination.path),
+              fileSize(at: destination) == expected.sizeBytes,
+              let data = try? Data(contentsOf: receiptURL),
+              let receipt = try? JSONDecoder().decode(VerifiedFileReceipt.self, from: data) else {
+            return false
+        }
+        return receipt.sizeBytes == expected.sizeBytes &&
+            receipt.sha256.caseInsensitiveCompare(expected.sha256) == .orderedSame
+    }
+
+    private static func verifyDownloadedFile(at url: URL, expected: AetherModelManifest.File) throws {
+        guard fileSize(at: url) == expected.sizeBytes else {
+            throw AetherModelDeliveryError.integrityFailed("Expected \(expected.sizeBytes) bytes for \(expected.filename).")
+        }
+        let digest = try sha256(at: url)
+        guard digest.caseInsensitiveCompare(expected.sha256) == .orderedSame else {
+            throw AetherModelDeliveryError.integrityFailed("SHA-256 verification failed for \(expected.filename).")
+        }
+    }
+
+    private static func sha256(at url: URL) throws -> String {
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        var hasher = SHA256()
+        while true {
+            let data = try handle.read(upToCount: 1_024 * 1_024) ?? Data()
+            guard !data.isEmpty else { break }
+            hasher.update(data: data)
+        }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
+    private static func fileSize(at url: URL) -> Int64 {
+        (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init) ?? 0
+    }
+
+    private static func safePathComponent(_ raw: String) -> String {
+        let sanitized = raw.unicodeScalars.map { scalar -> Character in
+            CharacterSet.alphanumerics.union(CharacterSet(charactersIn: ".-_")).contains(scalar) ? Character(String(scalar)) : "-"
+        }
+        return String(sanitized).trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+    }
+
+    private static func downloadErrorDescription(_ error: AetherModelDownloadError) -> String {
+        switch error {
+        case .httpStatus(let code): return "HTTP \(code)."
+        case .transport(let message), .write(let message): return message
         }
     }
 

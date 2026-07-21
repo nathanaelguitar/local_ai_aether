@@ -179,7 +179,7 @@ final class AetherBetaTelemetry {
             timestamp: Date(),
             channel: AetherBuildChannel.name,
             appVersion: appVersion,
-            modelVersion: AetherModelCatalog.aetherV1ModelVersion,
+            modelVersion: AetherActiveModelVersion.current,
             conversationID: conversationID,
             messageID: messageID,
             prompt: prompt.map { String($0.prefix(20_000)) },
