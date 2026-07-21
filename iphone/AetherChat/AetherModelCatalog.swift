@@ -9,11 +9,11 @@ enum InferenceProvider: String, CaseIterable, Identifiable {
 
 enum AetherModelCatalog {
     static let aetherV1DisplayName = "Canopy V1"
-    static let aetherV1ModelVersion = "1.1.1"
+    static let aetherV1ModelVersion = "1.1.2"
     static let legacyAetherV1DisplayName = "Aether V1"
-    static let requestedGGUFRepository = "mradermacher/Qwen3.5-2b-Kimi-and-Opus-Distillation-GGUF"
+    static let requestedGGUFRepository = "nathanaelguitar/canopy-1.1.2"
     static let requestedGGUFQuantization = "Q4_K_M"
-    static let aetherV1GGUFFilename = "Qwen3.5-2b-Kimi-and-Opus-Distillation.Q4_K_M.gguf"
+    static let aetherV1GGUFFilename = "canopy-1.1.2.Q4_K_M.gguf"
     static let aetherV1MMProjFilename = "Qwen3.5-2b-Kimi-and-Opus-Distillation.mmproj-Q8_0.gguf"
     // A 20k KV cache is expensive on an iPhone and is rarely needed because the
     // prompt builder already degrades older turns and attachments.
