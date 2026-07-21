@@ -99,9 +99,8 @@ does not re-download on restart. Use these server-side limits instead:
 | Action | Limit | Key |
 | --- | --- | --- |
 | Token registration | 5/hour | source IP, plus install ID where present |
-| Manifest issuance | 10/24 hours per model version | installation token |
+| Manifest issuance | 24/24 hours per model version | installation token |
 | Manifest issuance | 60/hour | source IP |
-| Active signed URLs | 3/24 hours per model version | installation token |
 
 Return `429` with `Retry-After` for a rate-limit response. The limits should
 permit ordinary retries, a 15-minute signed-URL refresh during a slow download,
