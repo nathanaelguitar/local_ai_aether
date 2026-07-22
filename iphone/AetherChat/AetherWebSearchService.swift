@@ -82,7 +82,8 @@ struct AetherWebSearchService: Sendable {
         guard !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw AetherWebSearchError.emptyResults
         }
-        let documents = Self.rankDocuments(Self.rankedDocuments(from: raw), for: cleaned)
+        let rankedDocuments = Self.rankDocuments(Self.rankedDocuments(from: raw), for: cleaned)
+        let documents = await Self.enrichDocuments(rankedDocuments, query: cleaned, session: session)
         let context = Self.formatContext(
             query: cleaned,
             searchQuery: searchQuery,
@@ -117,10 +118,11 @@ struct AetherWebSearchService: Sendable {
         }
 
         let html = String(data: data, encoding: .utf8) ?? ""
-        let documents = Self.rankDocuments(Self.duckDuckGoLiteDocuments(fromHTML: html), for: cleaned)
-        guard !documents.isEmpty else {
+        let rankedDocuments = Self.rankDocuments(Self.duckDuckGoLiteDocuments(fromHTML: html), for: cleaned)
+        guard !rankedDocuments.isEmpty else {
             throw AetherWebSearchError.emptyResults
         }
+        let documents = await Self.enrichDocuments(rankedDocuments, query: cleaned, session: session)
 
         let context = Self.formatContext(
             query: cleaned,
@@ -182,12 +184,16 @@ struct AetherWebSearchService: Sendable {
     ) -> String {
         if !documents.isEmpty {
             let resultText = documents.prefix(6).enumerated().map { index, document in
-                """
+                var text = """
                 [\(index + 1)] \(document.title)
                 Source: \(document.source)
                 URL: \(document.url)
-                Snippet: \(document.snippet)
+                Search snippet: \(document.snippet)
                 """
+                if !document.evidence.isEmpty {
+                    text += "\nArticle evidence:\n\(document.evidence)"
+                }
+                return text
             }.joined(separator: "\n\n")
 
             let sportsRules = isSportsTournamentQuery(query.lowercased()) ? """
@@ -206,6 +212,7 @@ struct AetherWebSearchService: Sendable {
             - Prefer higher-ranked sources first. Reuters, SEC, Nasdaq, AP, CNBC, Yahoo Finance, and official company/investor pages outrank SEO blogs, ads, and anonymous trackers.
             - For public-company, IPO, ticker, stock, price, and date questions, answer only what these sources explicitly support.
             \(sportsRules)
+            - Use article evidence before relying on a search snippet. The evidence belongs to the URL immediately above it.
             - Do not use general knowledge to fill a gap in the search results. If the results do not explicitly establish a winner, location, date, score, or status, say that the search results do not establish it.
             - Treat "planned", "targeted", "expected", and "projected" claims as stale when stronger sources say the event priced, raised money, listed, began trading, or completed.
             - If sources conflict, say that the results conflict and summarize the strongest source rather than inventing a compromise.
@@ -253,7 +260,7 @@ struct AetherWebSearchService: Sendable {
             }
 
             let snippet = cleanMarkdown(currentSnippet.joined(separator: " "))
-            let document = AetherSearchDocument(title: cleanMarkdown(title), url: decodedResultURL(url), snippet: snippet)
+            let document = AetherSearchDocument(title: cleanMarkdown(title), url: decodedResultURL(url), snippet: snippet, evidence: "")
             if document.isUsable {
                 documents.append(document)
             }
@@ -288,6 +295,104 @@ struct AetherWebSearchService: Sendable {
             }
     }
 
+    private static func enrichDocuments(
+        _ documents: [AetherSearchDocument],
+        query: String,
+        session: URLSession
+    ) async -> [AetherSearchDocument] {
+        let candidates = Array(documents.prefix(4))
+        return await withTaskGroup(of: (Int, String?).self, returning: [AetherSearchDocument].self) { group in
+            for (index, document) in candidates.enumerated() {
+                group.addTask {
+                    (index, await fetchArticleEvidence(url: document.url, query: query, session: session))
+                }
+            }
+
+            var evidenceByIndex = [Int: String]()
+            for await (index, evidence) in group {
+                if let evidence, !evidence.isEmpty {
+                    evidenceByIndex[index] = evidence
+                }
+            }
+
+            return documents.enumerated().map { index, document in
+                guard let evidence = evidenceByIndex[index] else { return document }
+                return document.withEvidence(evidence)
+            }
+        }
+    }
+
+    private static func fetchArticleEvidence(
+        url rawURL: String,
+        query: String,
+        session: URLSession
+    ) async -> String? {
+        guard let sourceURL = URL(string: rawURL),
+              let scheme = sourceURL.scheme?.lowercased(),
+              ["http", "https"].contains(scheme),
+              let host = sourceURL.host else { return nil }
+
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = "r.jina.ai"
+        components.path = "/http://\(host)\(sourceURL.path)"
+        components.query = sourceURL.query
+        guard let readerURL = components.url else { return nil }
+
+        var request = URLRequest(url: readerURL)
+        request.timeoutInterval = 12
+        request.setValue("CanopyChat/1.0 article retrieval", forHTTPHeaderField: "User-Agent")
+        guard let (data, response) = try? await session.data(for: request),
+              let http = response as? HTTPURLResponse,
+              (200...299).contains(http.statusCode),
+              let markdown = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+
+        return relevantPassages(from: markdown, query: query, maxCharacters: 2_000)
+    }
+
+    private static func relevantPassages(from markdown: String, query: String, maxCharacters: Int) -> String {
+        let terms = Set(query.lowercased()
+            .split { !$0.isLetter && !$0.isNumber }
+            .map(String.init)
+            .filter { $0.count >= 3 && !searchStopWords.contains($0) })
+        let paragraphs = markdown
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .components(separatedBy: "\n\n")
+            .map { cleanMarkdown($0) }
+            .filter { $0.count >= 40 }
+
+        guard !paragraphs.isEmpty else { return "" }
+        let scored = paragraphs.enumerated().map { index, paragraph in
+            let lowercased = paragraph.lowercased()
+            let score = terms.reduce(0) { partial, term in
+                partial + (lowercased.contains(term) ? 1 : 0)
+            }
+            return (index, score, paragraph)
+        }
+        let selected = scored
+            .sorted { left, right in
+                if left.1 == right.1 { return left.0 < right.0 }
+                return left.1 > right.1
+            }
+            .prefix(4)
+            .sorted { $0.0 < $1.0 }
+
+        var output = ""
+        for (_, _, paragraph) in selected {
+            let addition = output.isEmpty ? paragraph : "\n\n\(paragraph)"
+            guard output.count + addition.count <= maxCharacters else { break }
+            output += addition
+        }
+        return output
+    }
+
+    private static let searchStopWords: Set<String> = [
+        "the", "and", "for", "that", "with", "from", "what", "when", "where",
+        "who", "are", "was", "were", "this", "about", "near", "current", "latest"
+    ]
+
     private static func rankDocuments(_ documents: [AetherSearchDocument], for query: String) -> [AetherSearchDocument] {
         documents.sorted { left, right in
             let leftScore = left.score(for: query)
@@ -316,7 +421,8 @@ struct AetherWebSearchService: Sendable {
             let document = AetherSearchDocument(
                 title: cleanHTML(String(html[titleRange])),
                 url: decodedResultURL(cleanHTML(String(html[urlRange]))),
-                snippet: cleanHTML(String(html[snippetRange]))
+                snippet: cleanHTML(String(html[snippetRange])),
+                evidence: ""
             )
             return document.isUsable ? document : nil
         }
@@ -372,6 +478,11 @@ private struct AetherSearchDocument: Sendable {
     let title: String
     let url: String
     let snippet: String
+    let evidence: String
+
+    func withEvidence(_ evidence: String) -> Self {
+        Self(title: title, url: url, snippet: snippet, evidence: evidence)
+    }
 
     var source: String {
         guard let host = URL(string: url)?.host else { return url }
