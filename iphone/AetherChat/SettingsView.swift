@@ -64,8 +64,8 @@ struct SettingsView: View {
                             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                         }
 
-                        // AI config
-                        SettingsSection(title: "AI Configuration") {
+                        // LLM config
+                        SettingsSection(title: "LLM Configuration") {
                             VStack(spacing: 0) {
                                 SettingsInfoRow(
                                     icon: "cpu",

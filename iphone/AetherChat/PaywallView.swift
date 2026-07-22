@@ -35,7 +35,7 @@ struct PaywallView: View {
                     }
 
                     VStack(alignment: .leading, spacing: 16) {
-                        PaywallFeature(icon: "iphone.gen3", title: "On-device AI", subtitle: "Run private chats locally on your iPhone.")
+                        PaywallFeature(icon: "iphone.gen3", title: "On-device LLM", subtitle: "Run private chats locally on your iPhone.")
                         PaywallFeature(icon: "lock.shield", title: "Built for privacy", subtitle: "Your conversations stay on your device by default.")
                         PaywallFeature(icon: "magnifyingglass", title: "Search when needed", subtitle: "Use web grounding and location-aware answers when you ask.")
                     }

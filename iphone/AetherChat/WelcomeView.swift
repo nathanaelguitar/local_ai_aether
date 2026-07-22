@@ -14,7 +14,7 @@ struct WelcomeView: View {
 
     private var primaryFeature: (icon: String, title: String, subtitle: String) {
         isContributorBeta
-            ? ("🌿", "Efficient On-Device AI", "Run the model already in your hand instead of a remote data center")
+            ? ("🌿", "Efficient On-Device LLM", "Run the model already in your hand instead of a remote data center")
             : ("🔒", "Privacy First", "CanopyChat runs locally on your iPhone by default")
     }
 
