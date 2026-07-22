@@ -611,25 +611,25 @@ class AppState: ObservableObject {
                 from: latestUserText,
                 previousMessages: priorMessages
             )
-            let candidateWebQuery = webSearchEnabled
-                ? AetherWebSearchIntent.query(from: latestUserText, previousMessages: priorMessages)
-                : nil
-            let requestedWebQuery = forcedWebSearchQuery ?? detectedExplicitWebQuery
+            let candidateWebQuery = AetherWebSearchIntent.query(
+                from: latestUserText,
+                previousMessages: priorMessages
+            )
+            let requestedWebQuery = forcedWebSearchQuery ?? detectedExplicitWebQuery ?? candidateWebQuery
             let webSearchRequestSource: String = {
                 if forcedWebSearchQuery != nil { return "suggested_action" }
                 if detectedExplicitWebQuery != nil { return "explicit_prompt" }
+                if candidateWebQuery != nil { return "automatic_candidate" }
                 return "none"
             }()
             let webQuery = webSearchEnabled ? requestedWebQuery : nil
-            let shouldOfferSearch = webSearchEnabled
-                && forcedWebSearchQuery == nil
-                && detectedExplicitWebQuery == nil
-                && candidateWebQuery != nil
             var webSearchContext: String?
             var webSourcesMarkdown: String?
             var webSearchSourceCount = 0
             var webSearchSucceeded = false
-            var webSearchOutcome = requestedWebQuery == nil ? "not_requested" : "disabled"
+            var webSearchOutcome = requestedWebQuery == nil
+                ? "not_requested"
+                : (webSearchEnabled ? "pending" : "disabled")
             if let webQuery {
                 if networkMonitor.hasReceivedStatus && !networkMonitor.isConnected {
                     webSearchContext = offlineWebContext(for: webQuery, conversationID: id)
@@ -692,13 +692,7 @@ class AppState: ObservableObject {
             */
             response = AetherResponseNormalizer.displayText(response)
             response = responseWithSources(response, sourcesMarkdown: webSourcesMarkdown)
-            var suggestedWebQuery: String?
-            if shouldOfferSearch,
-               let candidateWebQuery,
-               !networkMonitor.hasReceivedStatus || networkMonitor.isConnected {
-                webSearchSuggestion = AetherWebSearchSuggestion(conversationID: id, query: candidateWebQuery)
-                suggestedWebQuery = candidateWebQuery
-            }
+            let suggestedWebQuery: String? = nil
             modelLoadingMessage = nil
             generationStatusMessage = nil
             streamingPreview = nil

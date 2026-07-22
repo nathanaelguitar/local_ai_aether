@@ -1718,14 +1718,14 @@ struct InputBar: View {
                 .disabled(isSending)
                 .popover(isPresented: $showingAttachMenu, arrowEdge: .bottom) {
                     VStack(alignment: .leading, spacing: 0) {
-                        attachRow(icon: "paperclip", title: "Attach File") {
-                            dismissMenuThen(onFile)
+                        attachRow(icon: "camera", title: "Camera") {
+                            dismissMenuThen(onCamera)
                         }
                         attachRow(icon: "photo.on.rectangle.angled", title: "Photos") {
                             dismissMenuThen { showingPhotoPicker = true }
                         }
-                        attachRow(icon: "camera", title: "Camera") {
-                            dismissMenuThen(onCamera)
+                        attachRow(icon: "paperclip", title: "Attach File") {
+                            dismissMenuThen(onFile)
                         }
                         Divider()
                             .padding(.vertical, 6)
@@ -1734,10 +1734,10 @@ struct InputBar: View {
                                 .font(.system(size: 16))
                                 .foregroundColor(AetherColors.oakMedium)
                                 .frame(width: 24)
-                            Text("Search Web")
+                            Text("Web Search")
                                 .font(.system(size: 15))
                             Spacer()
-                            Toggle("Search Web", isOn: $webSearchEnabled)
+                            Toggle("Web Search", isOn: $webSearchEnabled)
                                 .labelsHidden()
                                 .tint(AetherColors.forestMedium)
                         }
