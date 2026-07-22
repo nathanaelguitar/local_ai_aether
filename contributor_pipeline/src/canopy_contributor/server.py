@@ -147,6 +147,11 @@ class ContributorRequestHandler(BaseHTTPRequestHandler):
         if length <= 0:
             raise ValueError("invalid Content-Length")
         if length > MAX_BODY_BYTES:
+            # Drain a bounded amount before replying. Without this, a client
+            # still streaming an oversized body can observe a connection reset
+            # instead of the intended 413 response. The bound preserves the
+            # request-size guarantee under malicious Content-Length values.
+            self.rfile.read(min(length, MAX_BODY_BYTES + 1))
             raise RequestTooLarge
         body = self.rfile.read(length)
         if len(body) != length:
