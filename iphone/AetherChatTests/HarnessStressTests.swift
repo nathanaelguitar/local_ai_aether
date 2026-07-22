@@ -209,6 +209,8 @@ final class HarnessStressTests: XCTestCase {
     func testOnlyExplicitSearchRequestsAreAutomatic() {
         XCTAssertNil(AetherWebSearchIntent.explicitQuery(from: "What's the weather today?", previousMessages: []))
         XCTAssertNotNil(AetherWebSearchIntent.explicitQuery(from: "Search the web for today's weather", previousMessages: []))
+        XCTAssertNotNil(AetherWebSearchIntent.explicitQuery(from: "Search online for today's weather", previousMessages: []))
+        XCTAssertNotNil(AetherWebSearchIntent.explicitQuery(from: "Busca en internet el clima de hoy", previousMessages: []))
         XCTAssertNotNil(AetherWebSearchIntent.query(from: "What's the weather today?", previousMessages: []))
     }
 

@@ -20,6 +20,7 @@ enum AetherTelemetryEventType: String, Codable, Sendable {
     case messageResent
     case searchSuggested
     case searchChosen
+    case webSearchRequested
     case webSearchPerformed
     case issueReported
     case responseTruncated
@@ -276,15 +277,20 @@ final class AetherBetaTelemetry {
                 event.id == response.id || (response.messageID != nil && event.messageID == response.messageID)
             }
             let isFailure = related.contains(where: isExplicitFailure)
-            guard isFailure || isControlSample(response.id) else { continue }
+            let hasHarnessSignal = related.contains(where: isHarnessSignal)
+            // Keep every explicit web-search signal with the surrounding prompt
+            // and response. This teaches the harness when a user wanted live
+            // grounding, chose it, or was blocked because it was disabled.
+            guard isFailure || hasHarnessSignal || isControlSample(response.id) else { continue }
             for event in related where selected.count < 100 && selectedIDs.insert(event.id).inserted {
                 selected.append(event)
             }
         }
         guard let firstCandidateAt = selected.map(\.timestamp).min() else { return [] }
-        // Explicit failure signals are time-sensitive and high-value. Deliver
-        // them promptly; the 2% control sample is still efficiently batched.
-        if !selected.contains(where: isExplicitFailure), selected.count < 50 {
+        // Explicit failures and web-search harness signals are time-sensitive
+        // and high-value. Deliver them promptly; the 2% control sample is
+        // still efficiently batched.
+        if !selected.contains(where: { isExplicitFailure($0) || isHarnessSignal($0) }), selected.count < 50 {
             let deadline = firstCandidateAt.addingTimeInterval(24 * 60 * 60)
             guard deadline <= Date() else {
                 scheduleBatchDeadline(at: deadline)
@@ -305,6 +311,15 @@ final class AetherBetaTelemetry {
             return true
         default:
             return event.metadata["truncated"] == "true" || event.metadata["validation_failed"] == "true"
+        }
+    }
+
+    private func isHarnessSignal(_ event: AetherTelemetryEvent) -> Bool {
+        switch event.type {
+        case .searchSuggested, .searchChosen, .webSearchRequested, .webSearchPerformed:
+            return true
+        default:
+            return false
         }
     }
 

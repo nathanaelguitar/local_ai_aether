@@ -604,25 +604,37 @@ class AppState: ObservableObject {
             generationStatusMessage = messageSnapshot.contains(where: { !$0.attachments.isEmpty })
                 ? "Reading attachments and the conversation"
                 : "Reading the conversation"
+            // Detect explicit search language even when search is disabled. In
+            // the Contributor Beta, that distinction is valuable harness data:
+            // it shows a user wanted grounding but the current setting blocked it.
+            let detectedExplicitWebQuery = AetherWebSearchIntent.explicitQuery(
+                from: latestUserText,
+                previousMessages: priorMessages
+            )
             let candidateWebQuery = webSearchEnabled
                 ? AetherWebSearchIntent.query(from: latestUserText, previousMessages: priorMessages)
                 : nil
-            let explicitWebQuery = webSearchEnabled
-                ? AetherWebSearchIntent.explicitQuery(from: latestUserText, previousMessages: priorMessages)
-                : nil
-            let webQuery = webSearchEnabled ? (forcedWebSearchQuery ?? explicitWebQuery) : nil
+            let requestedWebQuery = forcedWebSearchQuery ?? detectedExplicitWebQuery
+            let webSearchRequestSource: String = {
+                if forcedWebSearchQuery != nil { return "suggested_action" }
+                if detectedExplicitWebQuery != nil { return "explicit_prompt" }
+                return "none"
+            }()
+            let webQuery = webSearchEnabled ? requestedWebQuery : nil
             let shouldOfferSearch = webSearchEnabled
                 && forcedWebSearchQuery == nil
-                && explicitWebQuery == nil
+                && detectedExplicitWebQuery == nil
                 && candidateWebQuery != nil
             var webSearchContext: String?
             var webSourcesMarkdown: String?
             var webSearchSourceCount = 0
             var webSearchSucceeded = false
+            var webSearchOutcome = requestedWebQuery == nil ? "not_requested" : "disabled"
             if let webQuery {
                 if networkMonitor.hasReceivedStatus && !networkMonitor.isConnected {
                     webSearchContext = offlineWebContext(for: webQuery, conversationID: id)
                     webSourcesMarkdown = nil
+                    webSearchOutcome = "offline"
                 } else {
                     generationStatusMessage = "Searching the web"
                     do {
@@ -632,9 +644,11 @@ class AppState: ObservableObject {
                         webSourcesMarkdown = searchResult.sourcesMarkdown
                         webSearchSourceCount = searchResult.citations.count
                         webSearchSucceeded = true
+                        webSearchOutcome = "succeeded"
                     } catch {
                         webSearchContext = offlineWebContext(for: webQuery, conversationID: id)
                         webSourcesMarkdown = nil
+                        webSearchOutcome = "failed"
                     }
                 }
             }
@@ -678,16 +692,12 @@ class AppState: ObservableObject {
             */
             response = AetherResponseNormalizer.displayText(response)
             response = responseWithSources(response, sourcesMarkdown: webSourcesMarkdown)
+            var suggestedWebQuery: String?
             if shouldOfferSearch,
                let candidateWebQuery,
                !networkMonitor.hasReceivedStatus || networkMonitor.isConnected {
                 webSearchSuggestion = AetherWebSearchSuggestion(conversationID: id, query: candidateWebQuery)
-                AetherBetaTelemetry.shared.record(
-                    .searchSuggested,
-                    conversationID: id,
-                    prompt: latestUserText,
-                    metadata: ["query": candidateWebQuery]
-                )
+                suggestedWebQuery = candidateWebQuery
             }
             modelLoadingMessage = nil
             generationStatusMessage = nil
@@ -703,11 +713,51 @@ class AppState: ObservableObject {
                 metadata: [
                     "latency_ms": String(Int(Date().timeIntervalSince(inferenceStartedAt) * 1_000)),
                     "web_search_requested": String(webQuery != nil),
+                    "web_search_enabled": String(webSearchEnabled),
+                    "web_search_intent_detected": String(requestedWebQuery != nil),
+                    "web_search_request_source": webSearchRequestSource,
+                    "web_search_outcome": webSearchOutcome,
                     "web_search_succeeded": String(webSearchSucceeded),
                     "web_search_source_count": String(webSearchSourceCount),
-                    "search_suggested": String(shouldOfferSearch)
+                    "search_suggested": String(suggestedWebQuery != nil)
                 ]
             )
+            if let suggestedWebQuery {
+                AetherBetaTelemetry.shared.record(
+                    .searchSuggested,
+                    conversationID: id,
+                    messageID: responseMessageID,
+                    prompt: latestUserText,
+                    response: response,
+                    metadata: ["query": String(suggestedWebQuery.prefix(1_024))]
+                )
+            }
+            if let requestedWebQuery {
+                let searchMetadata = [
+                    "query": String(requestedWebQuery.prefix(1_024)),
+                    "source": webSearchRequestSource,
+                    "enabled": String(webSearchEnabled),
+                    "outcome": webSearchOutcome
+                ]
+                AetherBetaTelemetry.shared.record(
+                    .webSearchRequested,
+                    conversationID: id,
+                    messageID: responseMessageID,
+                    prompt: latestUserText,
+                    response: response,
+                    metadata: searchMetadata
+                )
+                if webQuery != nil {
+                    AetherBetaTelemetry.shared.record(
+                        .webSearchPerformed,
+                        conversationID: id,
+                        messageID: responseMessageID,
+                        prompt: latestUserText,
+                        response: response,
+                        metadata: searchMetadata
+                    )
+                }
+            }
             if generatedReply.didReachOutputLimit {
                 AetherBetaTelemetry.shared.record(
                     .responseTruncated,

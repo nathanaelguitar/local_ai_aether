@@ -72,6 +72,12 @@ class SchemaTests(unittest.TestCase):
         self.assertEqual(parsed.events[0].app_version, "1.1.1 (20)")
         self.assertEqual(parsed.events[0].model_version, "1.1.1")
 
+    def test_web_search_request_event_is_accepted(self) -> None:
+        parsed = ContributorBatch.from_dict(
+            batch_payload(event("webSearchRequested", metadata={"enabled": "false", "outcome": "disabled"}))
+        )
+        self.assertEqual(parsed.events[0].type, "webSearchRequested")
+
 
 class StorageTests(unittest.TestCase):
     def test_required_persistent_storage_layout_is_created(self) -> None:

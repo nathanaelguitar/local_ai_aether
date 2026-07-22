@@ -495,11 +495,26 @@ enum AetherWebSearchIntent {
 
     private static let stripPhrases = [
         "search the web",
+        "search the internet",
+        "search online",
         "web search",
         "look it up",
         "look up",
         "search for",
         "find out",
+        "find information on",
+        "check the web",
+        "google it",
+        "google",
+        "busca en internet",
+        "busca en la web",
+        "busca en web",
+        "mira en internet",
+        "búscalo",
+        "buscalo",
+        "googlealo",
+        "googleálo",
+        "investiga",
         "research",
         "and get back to me",
         "and tell me",
@@ -510,11 +525,26 @@ enum AetherWebSearchIntent {
 
     private static let explicitSearchPhrases = [
         "search the web",
+        "search the internet",
+        "search online",
         "web search",
         "look it up",
         "look up",
         "search for",
-        "find out"
+        "find out",
+        "find information on",
+        "check the web",
+        "google it",
+        "google ",
+        "busca en internet",
+        "busca en la web",
+        "busca en web",
+        "mira en internet",
+        "búscalo",
+        "buscalo",
+        "googlealo",
+        "googleálo",
+        "investiga"
     ]
 
     private static let entityLookupPrefixes = [

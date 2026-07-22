@@ -19,6 +19,8 @@ Collect only these text events after consent:
 | Thumbs down | `responseRated` | `metadata.rating = negative` |
 | Thumbs up | `responseRated` | `metadata.rating = positive` |
 | Regenerate | `responseRegenerated` | message ID |
+| Explicit web-search request | `webSearchRequested` | prompt, derived query, whether search was enabled, request source, and outcome |
+| Web search attempt | `webSearchPerformed` | prompt, derived query, result outcome, and source count |
 | Correction | `userCorrection` | `user_correction` text and message ID |
 | Empty/truncated answer | `responseEmpty` / `responseTruncated` | message ID and diagnostic metadata |
 | Inference/tool/schema failure | `inferenceFailed` / `toolFailed` / `outputValidationFailed` | message ID and non-sensitive diagnostics |

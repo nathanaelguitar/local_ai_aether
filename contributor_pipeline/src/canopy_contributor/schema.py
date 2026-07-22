@@ -15,6 +15,7 @@ ALLOWED_EVENT_TYPES = {
     "messageResent",
     "searchSuggested",
     "searchChosen",
+    "webSearchRequested",
     "webSearchPerformed",
     "issueReported",
     "responseTruncated",
