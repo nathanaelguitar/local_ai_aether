@@ -87,6 +87,23 @@ struct SettingsView: View {
                             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                         }
 
+                        if !CanopyContributorProgram.isContributorBuild {
+                            SettingsSection(title: "Accuracy & Safety") {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Label("Canopy may make mistakes", systemImage: "exclamationmark.triangle")
+                                        .font(.system(size: 15, weight: .semibold))
+                                    Text("Responses may be inaccurate, incomplete, or outdated. Verify important information independently. CanopyChat is not a substitute for medical, legal, financial, safety, or emergency advice.")
+                                        .font(.system(size: 13))
+                                        .foregroundColor(AetherColors.warmGray500)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                                .padding(16)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(Color(UIColor.secondarySystemBackground))
+                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            }
+                        }
+
                         // Subscription
                         SettingsSection(title: "Subscription") {
                             VStack(spacing: 0) {
