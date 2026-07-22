@@ -719,6 +719,7 @@ class AppState: ObservableObject {
                     "web_search_outcome": webSearchOutcome,
                     "web_search_succeeded": String(webSearchSucceeded),
                     "web_search_source_count": String(webSearchSourceCount),
+                    "location_query_detected": String(AetherLocationService.needsLocation(latestUserText)),
                     "search_suggested": String(suggestedWebQuery != nil)
                 ]
             )

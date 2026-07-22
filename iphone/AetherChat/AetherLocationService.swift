@@ -93,7 +93,7 @@ final class AetherLocationService: NSObject, CLLocationManagerDelegate {
         }
     }
 
-    static func needsLocation(_ query: String) -> Bool {
+    nonisolated static func needsLocation(_ query: String) -> Bool {
         let lc = query.lowercased()
         return lc.contains("near me")
             || lc.contains("nearby")
@@ -101,6 +101,10 @@ final class AetherLocationService: NSObject, CLLocationManagerDelegate {
             || lc.contains("my area")
             || lc.contains("my location")
             || lc.contains("current location")
+            || lc.contains("cerca de mí")
+            || lc.contains("cerca de mi")
+            || lc.contains("por aquí")
+            || lc.contains("por aqui")
     }
 
     private static func replacingNearMe(in query: String, with place: String) -> String {
@@ -111,6 +115,8 @@ final class AetherLocationService: NSObject, CLLocationManagerDelegate {
             .replacingOccurrences(of: #"(?i)\bmy\s+area\b"#, with: place, options: .regularExpression)
             .replacingOccurrences(of: #"(?i)\bmy\s+location\b"#, with: place, options: .regularExpression)
             .replacingOccurrences(of: #"(?i)\bcurrent\s+location\b"#, with: place, options: .regularExpression)
+            .replacingOccurrences(of: #"(?i)\bcerca\s+de\s+m[ií]\b"#, with: "cerca de \(place)", options: .regularExpression)
+            .replacingOccurrences(of: #"(?i)\bpor\s+aqu[ií]\b"#, with: "cerca de \(place)", options: .regularExpression)
     }
 
     private static func localizedQuery(_ query: String, originalUserText: String, place: String) -> String {
@@ -137,7 +143,12 @@ final class AetherLocationService: NSObject, CLLocationManagerDelegate {
             "lunch",
             "dinner",
             "breakfast",
-            "brunch"
+            "brunch",
+            "mcdonald",
+            "mcdonald's",
+            "fast food",
+            "burger",
+            "burgers"
         ].contains { lc.contains($0) }
     }
 }

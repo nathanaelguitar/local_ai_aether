@@ -577,6 +577,11 @@ enum AetherWebSearchIntent {
         let lc = current.lowercased()
         let explicitSearch = explicitSearchPhrases.contains { lc.contains($0) }
         let hasSearchTrigger = triggerPhrases.contains { lc.contains($0) }
+        // Local-place requests are implicitly current and location-dependent.
+        // Treat them as search candidates even without “search the web”.
+        if AetherLocationService.needsLocation(current) {
+            return contextualizedQuery(current, previousMessages: previousMessages)
+        }
         if let stripped = strippedSearchText(from: current), !stripped.isEmpty {
             guard explicitSearch || hasSearchTrigger || isLikelyInformationRequest(lc) else {
                 return nil
