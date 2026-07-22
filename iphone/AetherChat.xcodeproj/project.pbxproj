@@ -465,8 +465,8 @@
 				AETHER_BUILD_CHANNEL = contributor;
 				AETHER_BETA_TELEMETRY_ENDPOINT = "";
 				AETHER_BETA_TELEMETRY_HMAC_SECRET = "";
-				AETHER_MODEL_MANIFEST_ENDPOINT = "";
-				AETHER_MODEL_REGISTRATION_ENDPOINT = "";
+				AETHER_MODEL_MANIFEST_ENDPOINT = "https://model-api.canopychat.app/v1/model-manifest";
+				AETHER_MODEL_REGISTRATION_ENDPOINT = "https://model-api.canopychat.app/v1/tokens";
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
