@@ -24,7 +24,7 @@ The production host root is `/data/canopy/contributor_pipeline`. The marketing s
    openssl rand -hex 32
    ```
 
-   Put the two outputs into `CANOPY_CONTRIBUTOR_SHARED_SECRET` and `CANOPY_CONTRIBUTOR_ADMIN_TOKEN`. Generate a separate Cloudflare Tunnel token in the Cloudflare dashboard; never commit any of these values.
+   Put the two outputs into `CANOPY_CONTRIBUTOR_SHARED_SECRET` and `CANOPY_CONTRIBUTOR_ADMIN_TOKEN`. Generate a separate Cloudflare Tunnel token in Cloudflare; never commit any of these values.
 
 4. Confirm `.env` contains `CANOPY_CONTRIBUTOR_DOMAIN=contributor-api.canopychat.app` and `CANOPY_HOST_STORAGE_ROOT=/data/canopy/contributor_pipeline`.
 5. Start the internal services and verify readiness:
@@ -66,11 +66,19 @@ Never use `docker compose down -v` for routine shutdown; removing the volume can
 
 Use the existing Cloudflare zone for `canopychat.app`; do not create a separate domain and do not create an A or AAAA record pointing at the DGX.
 
-1. In Cloudflare Zero Trust, create a tunnel and install/configure a Docker connector.
-2. Add one public hostname: `contributor-api.canopychat.app` -> `http://caddy:8080`.
-3. Copy the tunnel token into the local, untracked `.env` as `CLOUDFLARE_TUNNEL_TOKEN`.
-4. Keep the public hostname equal to `CANOPY_CONTRIBUTOR_DOMAIN`. If it changes, replace it in local `.env` and the Cloudflare public-hostname rule; no code or Compose edit is needed.
-5. Start the connector with the command above and verify its logs.
+The dedicated tunnel created for this deployment is `canopy-contributor-api` (Tunnel ID `4a0152f2-34de-41f2-914f-3b787a416c19`). Its only public hostname is:
+
+```text
+contributor-api.canopychat.app -> http://caddy:8080
+```
+
+Its proxied DNS record targets the tunnel endpoint, not the DGX. Do not add the marketing hostname to this tunnel.
+
+1. Copy the connector token into the local, untracked `.env` as `CLOUDFLARE_TUNNEL_TOKEN`.
+2. Keep the public hostname equal to `CANOPY_CONTRIBUTOR_DOMAIN`. If you use a different subdomain, replace `contributor-api.canopychat.app` in local `.env`, the Cloudflare tunnel ingress, the DNS CNAME, `CONTRIBUTOR_INGEST_ORIGIN`, and the Worker secret. These are the exact real-domain replacement points; do not change the marketing site route.
+3. Start the connector with the command above and verify its logs.
+
+The iOS-facing route is `https://model-api.canopychat.app/v1/contributor/batches`. The model Worker validates the existing bearer token, applies D1-backed limits, signs the exact body with its private `CONTRIBUTOR_INGEST_HMAC_SECRET`, and forwards to `CONTRIBUTOR_INGEST_ORIGIN`. The iOS client needs only its bearer token and `Content-Type: application/json`; it never receives the DGX HMAC secret.
 
 The connector has outbound internet access only so it can reach Cloudflare. Ingest and Caddy share an internal Docker network, and the DGX has no inbound API listener. Configure a Cloudflare WAF/rate-limit rule in addition to the application limiter. Keep the Canopy marketing hostname and its Cloudflare rules in a separate policy and service configuration.
 
@@ -207,5 +215,16 @@ PYTHONPATH=src python3 -m compileall -q src tests
 docker compose --env-file .env.example config --quiet
 docker compose --env-file .env.example build
 ```
+
+Synthetic smoke test after both services are running (use only a disposable token and synthetic data):
+
+```sh
+curl --fail-with-body https://contributor-api.canopychat.app/ready
+curl -i -X POST https://contributor-api.canopychat.app/v1/contributor/batches \
+  -H 'Content-Type: application/json' \
+  --data '{"schema_version":1,"batch_id":"synthetic-REPLACE_ME","installation_id":"synthetic-install","sent_at":"2026-07-21T00:00:00Z","consent_for_model_improvement":true,"events":[]}'
+```
+
+The direct unsigned request must return `401`; valid uploads go through the Worker. Delete the synthetic batch after verification with the local deletion command above. Keep only its content-free tombstone.
 
 The example environment contains placeholders only. Never use it to start a service that could accept real data.

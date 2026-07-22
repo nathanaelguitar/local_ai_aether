@@ -115,6 +115,9 @@ class ContributorRequestHandler(BaseHTTPRequestHandler):
             if abs((datetime.now(timezone.utc) - _parse_request_timestamp(timestamp)).total_seconds()) > MAX_CLOCK_SKEW_SECONDS:
                 self._respond(HTTPStatus.UNAUTHORIZED, {"error": "stale_timestamp"})
                 return
+            if not self.store.ledger.claim_request_signature(signature):
+                self._respond(HTTPStatus.UNAUTHORIZED, {"error": "replayed_request"})
+                return
             encoding = self.headers.get("Content-Encoding", "").lower().strip()
             if encoding not in {"", "identity", "gzip"}:
                 self._respond(HTTPStatus.UNSUPPORTED_MEDIA_TYPE, {"error": "unsupported_content_encoding"})

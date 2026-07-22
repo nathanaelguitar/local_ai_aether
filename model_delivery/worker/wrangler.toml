@@ -9,6 +9,8 @@ compatibility_flags = ["nodejs_compat"]
 #   R2_SECRET_ACCESS_KEY - R2 S3-API secret key
 #   R2_BUCKET_NAME       - R2 bucket name
 #   ADMIN_SECRET         - Bearer token for /admin/tokens/revoke
+#   CONTRIBUTOR_INGEST_HMAC_SECRET - DGX-only HMAC secret; match local .env
+#   CONTRIBUTOR_INGEST_ORIGIN      - Full HTTPS DGX ingest URL
 
 [vars]
 ENVIRONMENT = "contributor"
@@ -16,15 +18,13 @@ ENVIRONMENT = "contributor"
 [[d1_databases]]
 binding = "DB"
 database_name = "canopy-model-delivery"
-database_id = "REPLACE_AFTER_wrangler_d1_create"
+database_id = "323e849e-54c8-4320-9fed-291286f993d8"
 
 [[r2_buckets]]
 binding = "MODEL_BUCKET"
-bucket_name = "REPLACE_WITH_YOUR_BUCKET_NAME"
+bucket_name = "canopy-model-files"
 preview_bucket_name = "canopy-model-delivery-preview"
 
-[routes]
-# Bind to your contributor subdomain. Activate via:
-#   wrangler deploy
-# Route is set in the Cloudflare dashboard under Workers & Pages > canopy-model-delivery > Triggers.
-# Pattern: model-api.canopychat.app/*
+# Bind the custom hostname through Cloudflare after the Worker is deployed:
+#   model-api.canopychat.app/*
+# The MCP/API setup must attach this domain to the deployed Worker.

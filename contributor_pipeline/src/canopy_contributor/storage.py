@@ -169,6 +169,12 @@ class ProcessingLedger:
                     );
                     CREATE INDEX IF NOT EXISTS emitted_records_batch_id
                         ON emitted_records(batch_id);
+                    CREATE TABLE IF NOT EXISTS request_replays (
+                        signature_hash TEXT PRIMARY KEY,
+                        seen_at REAL NOT NULL
+                    );
+                    CREATE INDEX IF NOT EXISTS request_replays_seen_at
+                        ON request_replays(seen_at);
                     """
                 )
 
@@ -252,6 +258,27 @@ class ProcessingLedger:
                 """,
                 (fingerprint, batch_id, dataset, emitted),
             )
+            return cursor.rowcount == 1
+
+    def claim_request_signature(self, signature: str, *, now: float | None = None) -> bool:
+        """Reject an exact signed-request replay within the five-minute window.
+
+        Only a hash of the HMAC header is retained. The signature itself is not
+        content, but hashing it also avoids retaining reusable authentication
+        material in the persistent ledger.
+        """
+
+        current = now if now is not None else datetime.now(timezone.utc).timestamp()
+        signature_hash = hashlib.sha256(signature.encode("ascii", "strict")).hexdigest()
+        cutoff = current - 300
+        with self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute("DELETE FROM request_replays WHERE seen_at < ?", (cutoff,))
+            cursor = connection.execute(
+                "INSERT OR IGNORE INTO request_replays(signature_hash, seen_at) VALUES (?, ?)",
+                (signature_hash, current),
+            )
+            connection.commit()
             return cursor.rowcount == 1
 
     def delete_batches(self, batch_ids: set[str], raw_paths: set[str]) -> None:

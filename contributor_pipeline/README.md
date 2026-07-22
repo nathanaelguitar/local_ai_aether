@@ -104,6 +104,8 @@ The public hostname is configured as `CANOPY_CONTRIBUTOR_DOMAIN=contributor-api.
 
 The stock Caddy image is used only as an internal HTTP reverse proxy for request limits, security headers, and upstream health checks. Application-level rate limiting remains enabled because stock Caddy has no rate-limit module. Add a Cloudflare WAF/rate-limit rule before accepting public beta traffic.
 
+The public iOS endpoint is `https://model-api.canopychat.app/v1/contributor/batches`. The Worker validates the existing installation bearer token, applies D1-backed install/IP limits, signs the exact request bytes with its private `CONTRIBUTOR_INGEST_HMAC_SECRET`, and forwards them to the tunnel. The DGX tunnel endpoint rejects unsigned direct requests. The iOS client needs no HMAC header and must never receive the DGX secret.
+
 ## Deletion and retention
 
 Use the authenticated local deletion CLI, never a public HTTP endpoint:

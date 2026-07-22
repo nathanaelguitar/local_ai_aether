@@ -1,5 +1,5 @@
 import { env, SELF, runInDurableObject } from "cloudflare:test";
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import type { Env } from "../src/types";
 
 // Apply D1 migration before tests
@@ -27,6 +27,16 @@ CREATE TABLE IF NOT EXISTS registration_attempts (
 );
 CREATE INDEX IF NOT EXISTS idx_reg_attempts_ip
   ON registration_attempts (ip_hash, attempted_at);
+CREATE TABLE IF NOT EXISTS contributor_upload_attempts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  token_hash TEXT NOT NULL,
+  ip_hash TEXT NOT NULL,
+  attempted_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_contributor_attempts_token_time
+  ON contributor_upload_attempts (token_hash, attempted_at);
+CREATE INDEX IF NOT EXISTS idx_contributor_attempts_ip_time
+  ON contributor_upload_attempts (ip_hash, attempted_at);
 `;
 
 const FAKE_META = JSON.stringify({
@@ -59,6 +69,17 @@ async function registerInstall(installId = "test-install"): Promise<string> {
   const body = await resp.json<{ token: string }>();
   expect(body.token.length).toBeGreaterThanOrEqual(24);
   return body.token;
+}
+
+function contributorBody(batchId = "batch-test-001"): string {
+  return JSON.stringify({
+    schema_version: 1,
+    batch_id: batchId,
+    installation_id: "install-test-001",
+    sent_at: "2026-07-21T00:00:00Z",
+    consent_for_model_improvement: true,
+    events: [],
+  });
 }
 
 // ── Health ────────────────────────────────────────────────────────────────────
@@ -268,5 +289,145 @@ describe("Unknown routes", () => {
   it("returns 404 for unknown paths", async () => {
     const resp = await SELF.fetch("http://model-api.canopychat.app/unknown");
     expect(resp.status).toBe(404);
+  });
+});
+
+// ── Contributor relay ────────────────────────────────────────────────────────
+
+describe("POST /v1/contributor/batches", () => {
+  beforeEach(async () => { await seedDb(); });
+
+  it("requires an authenticated installation token", async () => {
+    const resp = await SELF.fetch("http://model-api.canopychat.app/v1/contributor/batches", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: contributorBody(),
+    });
+    expect(resp.status).toBe(401);
+  });
+
+  it("rejects an invalid installation token without contacting the origin", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const resp = await SELF.fetch("http://model-api.canopychat.app/v1/contributor/batches", {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer invalid-contributor-token",
+        "Content-Type": "application/json",
+      },
+      body: contributorBody(),
+    });
+    expect(resp.status).toBe(403);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+  });
+
+  it("signs and forwards the exact request body without forwarding authorization", async () => {
+    const token = await registerInstall("contributor-forward");
+    const body = contributorBody("batch-forward-001");
+    let forwarded: Request | undefined;
+    let forwardedBody = "";
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      forwarded = new Request(input, init);
+      forwardedBody = await forwarded.clone().text();
+      return new Response(JSON.stringify({ receipt_id: "receipt-forward-001" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    try {
+      const resp = await SELF.fetch("http://model-api.canopychat.app/v1/contributor/batches", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+          "CF-Connecting-IP": "10.20.30.40",
+          "X-Canopy-App-Version": "should-not-be-forwarded",
+        },
+        body,
+      });
+      expect(resp.status).toBe(200);
+      expect(forwarded).toBeDefined();
+      expect(forwardedBody).toBe(body);
+      expect(forwarded!.headers.get("Authorization")).toBeNull();
+      expect(forwarded!.headers.get("Content-Type")).toBe("application/json");
+      expect(forwarded!.headers.get("X-Canopy-Timestamp")).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+      expect(forwarded!.headers.get("X-Canopy-Signature")).toMatch(/^sha256=[a-f0-9]{64}$/);
+      expect(forwarded!.headers.get("X-Canopy-Request-ID")).toMatch(/^[0-9a-f-]{36}$/);
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it("returns 413 for an oversized body before forwarding", async () => {
+    const token = await registerInstall("contributor-oversized");
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    try {
+      const resp = await SELF.fetch("http://model-api.canopychat.app/v1/contributor/batches", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+          "Content-Length": "2000001",
+        },
+        body: "x",
+      });
+      expect(resp.status).toBe(413);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it("enforces the per-install upload limit", async () => {
+    const token = await registerInstall("contributor-rate");
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      new Response(JSON.stringify({ receipt_id: "rate-receipt" }), { status: 200 }),
+    );
+    try {
+      for (let i = 0; i < 30; i++) {
+        const resp = await SELF.fetch("http://model-api.canopychat.app/v1/contributor/batches", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+            "CF-Connecting-IP": "10.20.30.41",
+          },
+          body: contributorBody(`batch-rate-${i}`),
+        });
+        expect(resp.status).toBe(200);
+      }
+      const blocked = await SELF.fetch("http://model-api.canopychat.app/v1/contributor/batches", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+          "CF-Connecting-IP": "10.20.30.41",
+        },
+        body: contributorBody("batch-rate-blocked"),
+      });
+      expect(blocked.status).toBe(429);
+      expect(blocked.headers.get("Retry-After")).toBe("86400");
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it("maps an unreachable contributor origin to 503", async () => {
+    const token = await registerInstall("contributor-origin-failure");
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("origin unavailable"));
+    try {
+      const resp = await SELF.fetch("http://model-api.canopychat.app/v1/contributor/batches", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: contributorBody("batch-origin-failure"),
+      });
+      expect(resp.status).toBe(503);
+    } finally {
+      fetchSpy.mockRestore();
+    }
   });
 });

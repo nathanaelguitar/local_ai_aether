@@ -6,6 +6,8 @@ export interface Env {
   R2_SECRET_ACCESS_KEY: string;
   R2_BUCKET_NAME: string;
   ADMIN_SECRET: string;
+  CONTRIBUTOR_INGEST_HMAC_SECRET: string;
+  CONTRIBUTOR_INGEST_ORIGIN: string;
   ENVIRONMENT: string;
 }
 

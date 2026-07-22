@@ -52,6 +52,8 @@ services:
     depends_on:
       ingest:
         condition: service_healthy
+    healthcheck:
+      disable: true
     volumes:
       - canopy_data:/data/canopy/contributor_pipeline
     networks: [contributor_internal]
@@ -91,6 +93,8 @@ services:
     depends_on:
       ingest:
         condition: service_healthy
+    healthcheck:
+      disable: true
     volumes:
       - canopy_data:/data/canopy/contributor_pipeline
     networks: [contributor_internal]

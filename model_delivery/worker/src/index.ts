@@ -7,6 +7,13 @@ import {
 import { buildManifestResponse, fetchManifestMeta } from "./manifest";
 import { checkManifestRateLimit, checkRegistrationRateLimit } from "./ratelimit";
 import { sha256 } from "./r2sign";
+import {
+  checkContributorUploadRateLimit,
+  CONTRIBUTOR_MAX_BODY_BYTES,
+  PayloadTooLargeError,
+  readBodyWithLimit,
+  signContributorBody,
+} from "./contributor";
 import type { Env } from "./types";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -23,7 +30,11 @@ function json(body: unknown, status = 200, extra?: HeadersInit): Response {
 }
 
 function clientIp(request: Request): string {
-  return request.headers.get("CF-Connecting-IP") ?? "unknown";
+  const direct = request.headers.get("CF-Connecting-IP");
+  if (direct) return direct;
+  const forwarded = request.headers.get("X-Forwarded-For");
+  const firstForwarded = forwarded?.split(",", 1)[0];
+  return firstForwarded?.trim() || "unknown";
 }
 
 /** Structured log — never includes raw bearer values, signed URLs, or secrets. */
@@ -128,6 +139,89 @@ async function handleRevoke(request: Request, env: Env): Promise<Response> {
   return json({ revoked: changed });
 }
 
+async function handleContributorBatch(request: Request, env: Env): Promise<Response> {
+  const requestId = crypto.randomUUID();
+  const rawToken = extractBearerToken(request);
+  if (!rawToken) {
+    return new Response(null, {
+      status: 401,
+      headers: { "WWW-Authenticate": 'Bearer realm="canopy-contributor"' },
+    });
+  }
+
+  const tokenRow = await validateToken(env.DB, rawToken);
+  if (!tokenRow) {
+    log("warn", "contributor_invalid_token", { request_id: requestId });
+    return json({ error: "invalid_token" }, 403);
+  }
+
+  const [mediaType = ""] = (request.headers.get("Content-Type") ?? "").split(";", 1);
+  const contentType = mediaType.trim().toLowerCase();
+  if (contentType !== "application/json") {
+    return json({ error: "content_type_must_be_json" }, 415);
+  }
+  const contentEncoding = request.headers.get("Content-Encoding")?.trim() ?? "";
+  if (contentEncoding && !["gzip", "identity"].includes(contentEncoding.toLowerCase())) {
+    return json({ error: "unsupported_content_encoding" }, 415);
+  }
+
+  const tokenHash = await sha256(rawToken);
+  const rate = await checkContributorUploadRateLimit(env.DB, tokenHash, clientIp(request));
+  if (!rate.allowed) {
+    log("warn", "contributor_rate_limited", {
+      request_id: requestId,
+      install_hash: (await sha256(tokenRow.install_id)).slice(0, 16),
+    });
+    return json({ error: "rate_limited" }, 429, {
+      "Retry-After": String(rate.retryAfterSeconds ?? 3600),
+    });
+  }
+
+  let body: Uint8Array;
+  try {
+    body = await readBodyWithLimit(request, CONTRIBUTOR_MAX_BODY_BYTES);
+  } catch (error) {
+    if (error instanceof PayloadTooLargeError) {
+      return json({ error: "payload_too_large" }, 413);
+    }
+    return json({ error: "invalid_request_body" }, 400);
+  }
+
+  const timestamp = new Date().toISOString();
+  const signature = await signContributorBody(env.CONTRIBUTOR_INGEST_HMAC_SECRET, timestamp, body);
+  const headers = new Headers({
+    "Content-Type": "application/json",
+    "X-Canopy-Timestamp": timestamp,
+    "X-Canopy-Signature": `sha256=${signature}`,
+    "X-Canopy-Request-ID": requestId,
+  });
+  if (contentEncoding) headers.set("Content-Encoding", contentEncoding);
+
+  let upstream: Response;
+  try {
+    upstream = await fetch(env.CONTRIBUTOR_INGEST_ORIGIN, {
+      method: "POST",
+      headers,
+      body,
+    });
+  } catch {
+    log("error", "contributor_origin_unreachable", { request_id: requestId });
+    return json({ error: "contributor_service_unavailable" }, 503);
+  }
+
+  log("info", "contributor_batch_relayed", {
+    request_id: requestId,
+    status: upstream.status,
+    install_hash: (await sha256(tokenRow.install_id)).slice(0, 16),
+  });
+  const responseHeaders = new Headers();
+  for (const name of ["Content-Type", "Cache-Control", "Retry-After"]) {
+    const value = upstream.headers.get(name);
+    if (value) responseHeaders.set(name, value);
+  }
+  return new Response(upstream.body, { status: upstream.status, headers: responseHeaders });
+}
+
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 export default {
@@ -153,6 +247,14 @@ export default {
 
     if (pathname === "/admin/tokens/revoke" && method === "POST") {
       return handleRevoke(request, env);
+    }
+
+    if (pathname === "/v1/contributor/batches" && method === "POST") {
+      return handleContributorBatch(request, env);
+    }
+
+    if (pathname === "/v1/contributor/health" && method === "GET") {
+      return json({ status: "ok", service: "canopy-contributor-relay" });
     }
 
     return json({ error: "not_found" }, 404);

@@ -96,6 +96,16 @@ class StorageTests(unittest.TestCase):
             with self.assertRaises(IdempotencyConflict):
                 store.store(batch, raw + b" ")
 
+    def test_idempotency_receipt_survives_store_reopen(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            payload = batch_payload(event())
+            raw = json.dumps(payload).encode()
+            batch = ContributorBatch.from_dict(payload)
+            first = BatchStore(directory).store(batch, raw)
+            reopened = BatchStore(directory).store(batch, raw)
+            self.assertEqual(reopened, first)
+            self.assertEqual(len(list(Path(directory, "raw").glob("**/*.json.gz"))), 1)
+
     def test_cross_process_style_concurrent_writes_create_one_raw_batch(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             payload = batch_payload(event())
@@ -261,6 +271,24 @@ class IngestionServerTests(unittest.TestCase):
         stale = (datetime.now(timezone.utc) - timedelta(minutes=6)).isoformat().replace("+00:00", "Z")
         with self.assertRaises(HTTPError) as error:
             self.request(payload, timestamp=stale)
+        self.assertEqual(error.exception.code, 401)
+
+    def test_exact_signed_request_replay_is_rejected(self) -> None:
+        payload = json.dumps(batch_payload(event())).encode()
+        timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        signature = hmac.new(self.secret.encode(), timestamp.encode() + b"." + payload, hashlib.sha256).hexdigest()
+        request_url = f"http://127.0.0.1:{self.server.server_port}/v1/contributor/batches"
+        headers = {
+            "Content-Type": "application/json",
+            "X-Canopy-Timestamp": timestamp,
+            "X-Canopy-Signature": f"sha256={signature}",
+        }
+        first_request = Request(request_url, data=payload, headers=headers, method="POST")
+        with urlopen(first_request, timeout=2) as response:
+            self.assertEqual(response.status, 200)
+        replay_request = Request(request_url, data=payload, headers=headers, method="POST")
+        with self.assertRaises(HTTPError) as error:
+            urlopen(replay_request, timeout=2)
         self.assertEqual(error.exception.code, 401)
 
     def test_request_size_is_rejected_before_body_processing(self) -> None:
