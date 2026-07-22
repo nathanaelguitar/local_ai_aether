@@ -704,6 +704,21 @@ class AppState: ObservableObject {
             streamingPreview = nil
             appendAssistantMessage(to: id, content: response)
             let responseMessageID = conversations.first(where: { $0.id == id })?.messages.last(where: { $0.role == .assistant })?.id
+            let searchLabel: String = {
+                if forcedWebSearchQuery != nil || detectedExplicitWebQuery != nil {
+                    return "explicit_positive"
+                }
+                if candidateWebQuery != nil || AetherLocationService.needsLocation(latestUserText) {
+                    return "heuristic_candidate"
+                }
+                return "unlabeled"
+            }()
+            let searchLabelSource: String = {
+                if forcedWebSearchQuery != nil { return "user_search_action" }
+                if detectedExplicitWebQuery != nil { return "explicit_prompt" }
+                if candidateWebQuery != nil { return "heuristic_candidate" }
+                return "none"
+            }()
             AetherBetaTelemetry.shared.record(
                 .responseGenerated,
                 conversationID: id,
@@ -720,7 +735,10 @@ class AppState: ObservableObject {
                     "web_search_succeeded": String(webSearchSucceeded),
                     "web_search_source_count": String(webSearchSourceCount),
                     "location_query_detected": String(AetherLocationService.needsLocation(latestUserText)),
-                    "search_suggested": String(suggestedWebQuery != nil)
+                    "search_suggested": String(suggestedWebQuery != nil),
+                    "search_label": searchLabel,
+                    "search_label_source": searchLabelSource,
+                    "control_group_eligible": searchLabel == "unlabeled" ? "true" : "false"
                 ]
             )
             if let suggestedWebQuery {
