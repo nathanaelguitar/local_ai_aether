@@ -611,6 +611,16 @@ enum AetherWebSearchIntent {
         return query(from: currentText, previousMessages: previousMessages)
     }
 
+    /// Broad candidate detector for beta data collection. This intentionally
+    /// over-collects likely current-information requests so the future
+    /// classifier can learn from both recognized and missed search intents.
+    static func isPotentialSearchRequest(_ text: String) -> Bool {
+        let lc = text.lowercased()
+        return triggerPhrases.contains { lc.contains($0) }
+            || explicitSearchPhrases.contains { lc.contains($0) }
+            || AetherLocationService.needsLocation(text)
+    }
+
     private static func isLikelyInformationRequest(_ lowercased: String) -> Bool {
         let normalized = lowercased
             .trimmingCharacters(in: .whitespacesAndNewlines)

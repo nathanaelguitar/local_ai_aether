@@ -733,6 +733,22 @@ class AppState: ObservableObject {
                     metadata: ["query": String(suggestedWebQuery.prefix(1_024))]
                 )
             }
+            if AetherWebSearchIntent.isPotentialSearchRequest(latestUserText) {
+                AetherBetaTelemetry.shared.record(
+                    .webSearchEvaluated,
+                    conversationID: id,
+                    messageID: responseMessageID,
+                    prompt: latestUserText,
+                    response: response,
+                    metadata: [
+                        "candidate_query": String((candidateWebQuery ?? "").prefix(1_024)),
+                        "detected_query": String((requestedWebQuery ?? "").prefix(1_024)),
+                        "enabled": String(webSearchEnabled),
+                        "outcome": webSearchOutcome,
+                        "location_query_detected": String(AetherLocationService.needsLocation(latestUserText))
+                    ]
+                )
+            }
             if let requestedWebQuery {
                 let searchMetadata = [
                     "query": String(requestedWebQuery.prefix(1_024)),

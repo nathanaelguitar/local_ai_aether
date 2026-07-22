@@ -98,6 +98,10 @@ final class AetherLocationService: NSObject, CLLocationManagerDelegate {
         return lc.contains("near me")
             || lc.contains("nearby")
             || lc.contains("around me")
+            || lc.contains("close to me")
+            || lc.contains("around here")
+            || lc.contains("near here")
+            || lc.contains("local")
             || lc.contains("my area")
             || lc.contains("my location")
             || lc.contains("current location")
@@ -105,6 +109,7 @@ final class AetherLocationService: NSObject, CLLocationManagerDelegate {
             || lc.contains("cerca de mi")
             || lc.contains("por aquí")
             || lc.contains("por aqui")
+            || lc.contains("cerca")
     }
 
     private static func replacingNearMe(in query: String, with place: String) -> String {

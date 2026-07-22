@@ -22,6 +22,7 @@ enum AetherTelemetryEventType: String, Codable, Sendable {
     case searchChosen
     case webSearchRequested
     case webSearchPerformed
+    case webSearchEvaluated
     case issueReported
     case responseTruncated
     case responseEmpty
@@ -316,7 +317,7 @@ final class AetherBetaTelemetry {
 
     private func isHarnessSignal(_ event: AetherTelemetryEvent) -> Bool {
         switch event.type {
-        case .searchSuggested, .searchChosen, .webSearchRequested, .webSearchPerformed:
+        case .searchSuggested, .searchChosen, .webSearchRequested, .webSearchPerformed, .webSearchEvaluated:
             return true
         default:
             return false
