@@ -1,6 +1,6 @@
 # Canopy Contributor Pipeline operations
 
-This service is for the opt-in Canopy Contributor Beta only. Keep the DGX storage volume restricted to the service account and approved reviewers. Do not put production conversations, raw uploads, or credentials in the repository.
+This service is for the opt-in Canopy Contributor Beta only. Production Canopy builds do not collect telemetry. The beta is capped operationally at 10,000 participating installations. Keep the DGX storage volume restricted to the service account and approved reviewers. Do not put production conversations, raw uploads, or credentials in the repository.
 
 The production host root is `/data/canopy/contributor_pipeline`. The marketing site remains separate at `https://canopychat.app/`; the contributor API hostname is `contributor-api.canopychat.app`.
 
@@ -80,7 +80,7 @@ Its proxied DNS record targets the tunnel endpoint, not the DGX. Do not add the 
 
 The iOS-facing route is `https://model-api.canopychat.app/v1/contributor/batches`. The model Worker validates the existing bearer token, applies D1-backed limits, signs the exact body with its private `CONTRIBUTOR_INGEST_HMAC_SECRET`, and forwards to `CONTRIBUTOR_INGEST_ORIGIN`. The iOS client needs only its bearer token and `Content-Type: application/json`; it never receives the DGX HMAC secret.
 
-The connector has outbound internet access only so it can reach Cloudflare. Ingest and Caddy share an internal Docker network, and the DGX has no inbound API listener. Configure a Cloudflare WAF/rate-limit rule in addition to the application limiter. Keep the Canopy marketing hostname and its Cloudflare rules in a separate policy and service configuration.
+The connector has outbound internet access only so it can reach Cloudflare. Ingest and Caddy share an internal Docker network, and the DGX has no inbound API listener. The Worker and DGX application limiters are the required beta controls; a Cloudflare edge rule is optional defense-in-depth. Keep the Canopy marketing hostname and its Cloudflare rules in a separate policy and service configuration.
 
 ## Storage, permissions, backup, and restore
 
@@ -103,11 +103,30 @@ sudo tar --exclude='./backups' -C /data/canopy/contributor_pipeline \
 sudo chmod 600 "/data/canopy/contributor_pipeline/backups/$backup_name"
 ```
 
-Copy backups to encrypted, access-controlled storage. Restore only while all services are stopped:
+The backup artifact must be encrypted before it leaves the host. For example, use GnuPG with a passphrase supplied through an approved secret-management process (the passphrase file below is only a placeholder path and must not be committed):
 
 ```sh
-sudo tar -xzf /secure/backup/path/canopy-contributor-YYYYMMDDTHHMMSSZ.tar.gz \
-  -C /data/canopy/contributor_pipeline
+backup_passphrase_file=/secure/backup-key/canopy-contributor.passphrase
+backup_name="canopy-contributor-$(date -u +%Y%m%dT%H%M%SZ).tar.gz.gpg"
+backup_output="/secure/backup/path/$backup_name"
+docker run --rm --user 0:0 \
+  -v /data/canopy/contributor_pipeline:/mnt \
+  contributor_pipeline-ingest:latest \
+  sh -c 'tar --exclude="./backups/*" -czf - -C /mnt .' \
+  | gpg --batch --yes --pinentry-mode loopback \
+      --passphrase-file "$backup_passphrase_file" \
+      --symmetric --cipher-algo AES256 \
+      --output "$backup_output"
+sudo chmod 600 "$backup_output"
+```
+
+Restore only while all services are stopped:
+
+```sh
+gpg --batch --pinentry-mode loopback \
+  --passphrase-file /secure/backup-key/canopy-contributor.passphrase \
+  --decrypt /secure/backup/path/canopy-contributor-YYYYMMDDTHHMMSSZ.tar.gz.gpg \
+  | sudo tar -xzf - -C /data/canopy/contributor_pipeline
 sudo chown -R 10001:10001 /data/canopy/contributor_pipeline
 sudo chmod 700 /data/canopy/contributor_pipeline
 docker compose --env-file .env up -d
@@ -183,7 +202,8 @@ Do not include request bodies or credentials in incident artifacts. Preserve enc
 
 - [ ] Cloudflare Tunnel hostname is `contributor-api.canopychat.app` with no DGX A/AAAA record.
 - [ ] No router port forwarding or public DGX firewall rule exists.
-- [ ] Cloudflare WAF/rate limiting is configured separately from the in-process limiter.
+- [ ] Optional Cloudflare edge rate limiting is configured separately from the Worker/DGX limiters.
+- [ ] Production app builds are confirmed to send no telemetry; beta enrollment is capped at 10,000 installations.
 - [ ] Shared secret, admin token, and tunnel token are independently generated and stored outside Git.
 - [ ] Tunnel service points to `http://caddy:8080`.
 - [ ] `/data/canopy/contributor_pipeline` is owned by UID/GID 10001 with mode 700.

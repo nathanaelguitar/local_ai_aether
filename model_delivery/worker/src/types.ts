@@ -8,6 +8,7 @@ export interface Env {
   ADMIN_SECRET: string;
   CONTRIBUTOR_INGEST_HMAC_SECRET: string;
   CONTRIBUTOR_INGEST_ORIGIN: string;
+  CONTRIBUTOR_BETA_MAX_INSTALLATIONS: string;
   ENVIRONMENT: string;
 }
 

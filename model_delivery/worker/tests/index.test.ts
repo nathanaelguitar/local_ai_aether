@@ -1,5 +1,6 @@
 import { env, SELF, runInDurableObject } from "cloudflare:test";
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import { claimContributorInstallation } from "../src/contributor";
 import type { Env } from "../src/types";
 
 // Apply D1 migration before tests
@@ -37,6 +38,10 @@ CREATE INDEX IF NOT EXISTS idx_contributor_attempts_token_time
   ON contributor_upload_attempts (token_hash, attempted_at);
 CREATE INDEX IF NOT EXISTS idx_contributor_attempts_ip_time
   ON contributor_upload_attempts (ip_hash, attempted_at);
+CREATE TABLE IF NOT EXISTS contributor_installations (
+  token_hash TEXT PRIMARY KEY,
+  first_seen_at TEXT NOT NULL
+);
 `;
 
 const FAKE_META = JSON.stringify({
@@ -429,5 +434,17 @@ describe("POST /v1/contributor/batches", () => {
     } finally {
       fetchSpy.mockRestore();
     }
+  });
+
+  it("enforces the beta installation ceiling without affecting existing installs", async () => {
+    const db = (env as unknown as Env).DB;
+    await db.prepare("DELETE FROM contributor_installations").run();
+    await db
+      .prepare("INSERT INTO contributor_installations (token_hash, first_seen_at) VALUES (?, ?)")
+      .bind("already-admitted", "2026-07-22T00:00:00Z")
+      .run();
+
+    expect(await claimContributorInstallation(db, "already-admitted", 1)).toBe(true);
+    expect(await claimContributorInstallation(db, "new-installation", 1)).toBe(false);
   });
 });

@@ -2,6 +2,8 @@
 
 This is the isolated, opt-in data path for the **Canopy Contributor Beta**. It accepts selected, consented text interactions, stores the original batch immutably, and turns it into reviewable training and evaluation candidates. It is separate from Canopy inference and from the public marketing website.
 
+Telemetry is disabled for the production app. This path is beta-only, opt-in, and intended for a maximum of 10,000 participating installations.
+
 The service does not make the production app collect data. The iOS integration is a separate release-controlled step after consent and privacy copy are approved.
 
 ## Data flow
@@ -102,7 +104,7 @@ docker compose --env-file .env --profile tunnel up --build -d
 
 The public hostname is configured as `CANOPY_CONTRIBUTOR_DOMAIN=contributor-api.canopychat.app`. Replace the domain only in the local `.env` and in the Cloudflare Tunnel public-hostname configuration; do not alter the Canopy marketing site route.
 
-The stock Caddy image is used only as an internal HTTP reverse proxy for request limits, security headers, and upstream health checks. Application-level rate limiting remains enabled because stock Caddy has no rate-limit module. Add a Cloudflare WAF/rate-limit rule before accepting public beta traffic.
+The stock Caddy image is used only as an internal HTTP reverse proxy for request limits, security headers, and upstream health checks. Application-level rate limiting remains enabled because stock Caddy has no rate-limit module. A Cloudflare edge rule is optional defense-in-depth; the Worker and DGX limiters are the required beta controls.
 
 The public iOS endpoint is `https://model-api.canopychat.app/v1/contributor/batches`. The Worker validates the existing installation bearer token, applies D1-backed install/IP limits, signs the exact request bytes with its private `CONTRIBUTOR_INGEST_HMAC_SECRET`, and forwards them to the tunnel. The DGX tunnel endpoint rejects unsigned direct requests. The iOS client needs no HMAC header and must never receive the DGX secret.
 

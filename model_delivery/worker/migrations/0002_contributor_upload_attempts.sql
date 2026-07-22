@@ -11,3 +11,10 @@ CREATE INDEX IF NOT EXISTS idx_contributor_upload_token_time
     ON contributor_upload_attempts (token_hash, attempted_at);
 CREATE INDEX IF NOT EXISTS idx_contributor_upload_ip_time
     ON contributor_upload_attempts (ip_hash, attempted_at);
+
+CREATE TABLE IF NOT EXISTS contributor_installations (
+    -- Stores SHA-256(install_id); the historical column name is retained for
+    -- migration compatibility and does not contain a bearer token.
+    token_hash    TEXT PRIMARY KEY,
+    first_seen_at TEXT NOT NULL
+);

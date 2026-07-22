@@ -7,6 +7,32 @@ const CONTRIBUTOR_INSTALL_WINDOW_SECONDS = 24 * 60 * 60;
 const CONTRIBUTOR_IP_LIMIT = 60;
 const CONTRIBUTOR_IP_WINDOW_SECONDS = 60 * 60;
 
+export async function claimContributorInstallation(
+  db: D1Database,
+  identityHash: string,
+  maxInstallations: number,
+): Promise<boolean> {
+  if (!Number.isInteger(maxInstallations) || maxInstallations < 1) {
+    throw new Error("invalid_contributor_capacity");
+  }
+
+  const existing = await db
+    .prepare("SELECT token_hash FROM contributor_installations WHERE token_hash = ?")
+    .bind(identityHash)
+    .first<{ token_hash: string }>();
+  if (existing) return true;
+
+  const result = await db
+    .prepare(
+      `INSERT OR IGNORE INTO contributor_installations (token_hash, first_seen_at)
+       SELECT ?, ?
+       WHERE (SELECT COUNT(*) FROM contributor_installations) < ?`,
+    )
+    .bind(identityHash, isoNow(), maxInstallations)
+    .run();
+  return (result.meta.changes ?? 0) === 1;
+}
+
 function isoNow(): string {
   return new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
 }

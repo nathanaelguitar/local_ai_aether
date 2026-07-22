@@ -9,6 +9,7 @@ import { checkManifestRateLimit, checkRegistrationRateLimit } from "./ratelimit"
 import { sha256 } from "./r2sign";
 import {
   checkContributorUploadRateLimit,
+  claimContributorInstallation,
   CONTRIBUTOR_MAX_BODY_BYTES,
   PayloadTooLargeError,
   readBodyWithLimit,
@@ -185,6 +186,16 @@ async function handleContributorBatch(request: Request, env: Env): Promise<Respo
       return json({ error: "payload_too_large" }, 413);
     }
     return json({ error: "invalid_request_body" }, 400);
+  }
+
+  const maxInstallations = Number.parseInt(env.CONTRIBUTOR_BETA_MAX_INSTALLATIONS, 10);
+  // Count stable installation identities, not bearer tokens, so token rotation
+  // cannot bypass the beta ceiling.
+  const installationHash = await sha256(tokenRow.install_id);
+  const admitted = await claimContributorInstallation(env.DB, installationHash, maxInstallations);
+  if (!admitted) {
+    log("warn", "contributor_beta_capacity_reached", { request_id: requestId });
+    return json({ error: "beta_capacity_reached" }, 429, { "Retry-After": "86400" });
   }
 
   const timestamp = new Date().toISOString();
