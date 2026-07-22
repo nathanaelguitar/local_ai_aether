@@ -46,11 +46,21 @@ function log(level: "info" | "warn" | "error", event: string, fields: Record<str
 // ── Route handlers ────────────────────────────────────────────────────────────
 
 async function handleHealth(env: Env): Promise<Response> {
+  if (!isDeliveryConfigurationValid(env)) {
+    return json({ status: "misconfigured", detail: "R2 delivery configuration is incomplete." }, 503);
+  }
   const meta = await fetchManifestMeta(env.MODEL_BUCKET);
   if (!meta) {
     return json({ status: "initializing", detail: "Run the DGX sync job first." }, 503);
   }
   return json({ status: "ok", version: meta.version });
+}
+
+function isDeliveryConfigurationValid(env: Env): boolean {
+  return /^[a-f0-9]{32}$/i.test((env.R2_ACCOUNT_ID ?? "").trim()) &&
+    Boolean(env.R2_ACCESS_KEY_ID?.trim()) &&
+    Boolean(env.R2_SECRET_ACCESS_KEY?.trim()) &&
+    Boolean(env.R2_BUCKET_NAME?.trim());
 }
 
 async function handleTokenRegistration(request: Request, env: Env): Promise<Response> {
@@ -80,6 +90,9 @@ async function handleTokenRegistration(request: Request, env: Env): Promise<Resp
 }
 
 async function handleManifest(request: Request, env: Env): Promise<Response> {
+  if (!isDeliveryConfigurationValid(env)) {
+    return json({ error: "service_misconfigured" }, 503);
+  }
   const rawToken = extractBearerToken(request);
   if (!rawToken) {
     return new Response(null, {

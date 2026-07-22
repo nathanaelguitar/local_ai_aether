@@ -40,6 +40,16 @@ export async function presignR2Get(opts: {
 }): Promise<{ url: string; expiresAt: string }> {
   const { accountId, accessKey, secretKey, bucket, key, expiresSeconds = 900 } = opts;
 
+  // Never emit a credential-bearing URL with a malformed host. A missing
+  // Worker secret otherwise becomes `undefined.r2.cloudflarestorage.com`,
+  // which presents to clients as an opaque TLS failure.
+  if (!/^[a-f0-9]{32}$/i.test(accountId.trim())) {
+    throw new Error("R2_ACCOUNT_ID is missing or invalid");
+  }
+  if (!accessKey.trim() || !secretKey.trim() || !bucket.trim() || !key.trim()) {
+    throw new Error("R2 signing configuration is incomplete");
+  }
+
   const host = `${accountId}.r2.cloudflarestorage.com`;
   const now = new Date();
   const amzDate = now.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");

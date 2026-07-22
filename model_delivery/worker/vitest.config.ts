@@ -9,7 +9,7 @@ export default defineWorkersProject({
           d1Databases: ["DB"],
           r2Buckets: ["MODEL_BUCKET"],
           bindings: {
-            R2_ACCOUNT_ID: "test-account",
+            R2_ACCOUNT_ID: "0123456789abcdef0123456789abcdef",
             R2_ACCESS_KEY_ID: "test-access-key",
             R2_SECRET_ACCESS_KEY: "test-secret-key",
             R2_BUCKET_NAME: "test-bucket",

@@ -88,6 +88,7 @@ struct AetherModelManifest: Decodable, Sendable {
         }
         for file in model.files {
             guard file.downloadURL.scheme?.lowercased() == "https",
+                  !isMalformedDeliveryHost(file.downloadURL.host),
                   !file.filename.isEmpty,
                   file.filename == URL(fileURLWithPath: file.filename).lastPathComponent,
                   file.sizeBytes > 0,
@@ -96,6 +97,13 @@ struct AetherModelManifest: Decodable, Sendable {
             }
         }
         return self
+    }
+
+    private func isMalformedDeliveryHost(_ host: String?) -> Bool {
+        guard let host = host?.lowercased() else { return true }
+        return host == "undefined.r2.cloudflarestorage.com" ||
+            host.hasPrefix("undefined.") ||
+            host.contains(" ")
     }
 
     func file(role: String) -> File? {
