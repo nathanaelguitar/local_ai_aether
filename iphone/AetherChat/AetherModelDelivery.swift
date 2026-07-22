@@ -350,6 +350,19 @@ actor AetherPrivateModelDelivery {
         return try await manifest()
     }
 
+    /// The contributor telemetry Worker validates this same opaque,
+    /// per-install credential before it forwards a batch to the DGX. The
+    /// app never receives the Worker-to-DGX HMAC secret.
+    func telemetryInstallationToken(refresh: Bool = false) async throws -> String {
+        guard let configuration = AetherModelDeliveryConfiguration.current else {
+            throw AetherModelDeliveryError.unavailable
+        }
+        if refresh {
+            AetherModelDeliveryKeychain.remove(tokenAccount)
+        }
+        return try await installationToken(using: configuration, forceRegistration: refresh)
+    }
+
     func cachedModel() -> AetherCachedPrivateModel? {
         AetherPrivateModelCache.load()
     }

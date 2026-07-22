@@ -25,7 +25,8 @@ struct ContentView: View {
                 }
             } else {
                 WelcomeView(onEnter: {
-                    if CanopyContributorProgram.isContributorBuild, !CanopyContributorProgram.isEnrolled {
+                    if CanopyContributorProgram.isContributorBuild,
+                       !CanopyContributorProgram.hasAcknowledgedDisclosure {
                         showingContributorDisclosure = true
                     } else {
                         enterApp()
@@ -43,8 +44,8 @@ struct ContentView: View {
             isPresented: $showingContributorDisclosure,
             titleVisibility: .visible
         ) {
-            Button("I understand — join the beta") {
-                CanopyContributorProgram.join()
+            Button("I understand — continue") {
+                CanopyContributorProgram.acknowledgeDisclosure()
                 enterApp()
             }
             Button("Not now", role: .cancel) {}

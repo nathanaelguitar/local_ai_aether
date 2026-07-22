@@ -5,11 +5,21 @@ import Foundation
 /// the Contributor TestFlight scheme and the production scheme stay compatible.
 @MainActor
 enum CanopyContributorProgram {
+    private static let disclosureAcknowledgedKey = "aether.contributorDisclosureAcknowledged"
+
     static var isContributorBuild: Bool { AetherBuildChannel.isContributor }
-    static var isEnrolled: Bool { isContributorBuild && AetherBetaTelemetry.shared.isEnabled }
+    static var hasAcknowledgedDisclosure: Bool {
+        isContributorBuild && UserDefaults.standard.bool(forKey: disclosureAcknowledgedKey)
+    }
+
+    static func acknowledgeDisclosure() {
+        guard isContributorBuild else { return }
+        UserDefaults.standard.set(true, forKey: disclosureAcknowledgedKey)
+    }
 
     static func join() {
         guard isContributorBuild else { return }
+        acknowledgeDisclosure()
         AetherBetaTelemetry.shared.setEnabled(true)
     }
 

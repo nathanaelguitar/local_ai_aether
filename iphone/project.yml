@@ -35,7 +35,6 @@ targets:
       OTHER_LDFLAGS:
         - "$(inherited)"
         - "-lsqlite3"
-      AETHER_BETA_TELEMETRY_HMAC_SECRET: ""
     dependencies:
       - package: LlamaSwift
         product: LlamaSwift

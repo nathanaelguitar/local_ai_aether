@@ -4,8 +4,8 @@ This document is intentionally implementation-oriented. It does not authorize a 
 
 ## Consent and installation identity
 
-1. Show a dedicated contributor disclosure before enabling collection.
-2. Default consent to **off**. Do not generate or upload any batch until the tester explicitly enables it.
+1. Show a dedicated contributor disclosure before the tester enters the Contributor Beta.
+2. The Contributor Beta may enable collection by default only after that disclosure is acknowledged. Production builds must remain collection-disabled. A tester can stop collection at any time in Settings; withdrawal deletes unsent batches immediately.
 3. Generate one random UUID with Keychain persistence as `installation_id`. Never use IDFV, advertising ID, email, Apple Account, phone number, or hardware identifier.
 4. On withdrawal, immediately stop candidate creation and delete all pending local batches. The server-side deletion workflow is a separate, authenticated support endpoint and must be implemented before accepting production-like beta data.
 
@@ -31,13 +31,12 @@ The local candidate scorer queues 100% of explicit failures and corrections plus
 
 Use the envelope defined in the module README. The body may use camelCase event keys for compatibility with the current `AetherTelemetryEvent`; the service normalizes them.
 
-For each upload:
+For each iOS upload:
 
 1. Serialize a body whose `schema_version` is `1` and `consent_for_model_improvement` is `true`.
-2. Optionally gzip it; sign the exact bytes that are sent.
-3. Set `X-Canopy-Timestamp` to UTC ISO-8601 time.
-4. Set `X-Canopy-Signature` to `sha256=` plus `HMAC-SHA256(secret, timestamp + "." + body)`.
-5. Preserve the local batch until a 200 response returns the matching `batch_id` and `receipt_id`.
-6. Retry with exponential backoff and jitter. Treat 401/409/422 as permanent failures requiring a local diagnostic, not endless retries.
+2. `POST` the exact body to `https://model-api.canopychat.app/v1/contributor/batches` with `Content-Type: application/json` and `Authorization: Bearer <per-install token>`.
+3. Obtain that opaque per-install token from the existing private-model registration service and keep it in the Keychain. Never put a DGX shared secret, Hugging Face token, or Cloudflare API credential in the app.
+4. Preserve the local batch until a 2xx response returns the matching `batch_id` and `receipt_id`.
+5. Retry transient failures with exponential backoff and jitter. On 401/403, refresh the per-install token once, then retry the immutable batch.
 
-The shared secret must not be a universal secret embedded in a public release. Before external distribution, replace it with per-contributor short-lived upload credentials minted by an authenticated enrollment service.
+The Cloudflare Worker authenticates the app token, applies rate limits, and adds the timestamp/HMAC headers expected by the DGX ingestion service. The Worker-to-DGX HMAC secret exists only in Worker and DGX secrets; it is never distributed in TestFlight.

@@ -90,7 +90,7 @@ private struct AetherContributorReceipt: Decodable {
     }
 }
 
-/// Contributor-beta-only, explicit-opt-in telemetry queue. It retains events locally,
+/// Contributor-beta-only telemetry queue. It retains events locally,
 /// selects failure-linked interactions plus a deterministic control sample, and only
 /// deletes an upload after the contributor ingestion service acknowledges its receipt.
 @MainActor
@@ -139,8 +139,10 @@ final class AetherBetaTelemetry {
         pendingUpload = (try? Data(contentsOf: pendingUploadURL)).flatMap { try? pendingDecoder.decode(AetherPendingContributorUpload.self, from: $0) }
 
         if AetherBuildChannel.isContributor {
-            // Sending model-improvement data always requires an affirmative user choice.
-            isEnabled = UserDefaults.standard.object(forKey: Self.enabledKey) as? Bool ?? false
+            // Contributor TestFlight distribution clearly discloses the
+            // model-improvement program. Production remains permanently off.
+            // A tester can still stop collection at any time in Settings.
+            isEnabled = UserDefaults.standard.object(forKey: Self.enabledKey) as? Bool ?? true
         } else {
             isEnabled = false
         }
@@ -202,7 +204,7 @@ final class AetherBetaTelemetry {
 
     private func flushIfConfigured() {
         guard !isFlushing,
-              let configuration = uploadConfiguration() else { return }
+              let endpoint = uploadEndpoint() else { return }
         guard let upload = pendingUpload ?? makePendingUpload() else { return }
         isFlushing = true
         pendingUpload = upload
@@ -213,18 +215,19 @@ final class AetherBetaTelemetry {
             defer { self.isFlushing = false }
             let backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "Canopy contributor upload")
             defer { UIApplication.shared.endBackgroundTask(backgroundTask) }
-            var request = URLRequest(url: configuration.endpoint)
-            request.httpMethod = "POST"
-            request.timeoutInterval = 30
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.setValue(upload.timestamp, forHTTPHeaderField: "X-Canopy-Timestamp")
-            request.setValue(self.hmacSignature(secret: configuration.secret, timestamp: upload.timestamp, body: upload.body), forHTTPHeaderField: "X-Canopy-Signature")
-            request.httpBody = upload.body
-
             do {
-                let (data, response) = try await URLSession.shared.data(for: request)
-                guard let http = response as? HTTPURLResponse,
-                      (200...299).contains(http.statusCode),
+                var token = try await AetherPrivateModelDelivery.shared.telemetryInstallationToken()
+                var result = try await self.upload(upload, to: endpoint, token: token)
+                if result.response.statusCode == 401 || result.response.statusCode == 403 {
+                    // A revoked or expired install credential can be replaced
+                    // once. The immutable batch ID preserves server-side
+                    // idempotency if the first attempt actually reached it.
+                    token = try await AetherPrivateModelDelivery.shared.telemetryInstallationToken(refresh: true)
+                    result = try await self.upload(upload, to: endpoint, token: token)
+                }
+                let data = result.data
+                let http = result.response
+                guard (200...299).contains(http.statusCode),
                       let receipt = try? self.decoder.decode(AetherContributorReceipt.self, from: data),
                       receipt.batchID == upload.batchID,
                       !receipt.receiptID.isEmpty else {
@@ -279,7 +282,9 @@ final class AetherBetaTelemetry {
             }
         }
         guard let firstCandidateAt = selected.map(\.timestamp).min() else { return [] }
-        if selected.count < 50 {
+        // Explicit failure signals are time-sensitive and high-value. Deliver
+        // them promptly; the 2% control sample is still efficiently batched.
+        if !selected.contains(where: isExplicitFailure), selected.count < 50 {
             let deadline = firstCandidateAt.addingTimeInterval(24 * 60 * 60)
             guard deadline <= Date() else {
                 scheduleBatchDeadline(at: deadline)
@@ -309,23 +314,29 @@ final class AetherBetaTelemetry {
         return Int(digest.first ?? 100) % 100 < 2
     }
 
-    private func uploadConfiguration() -> (endpoint: URL, secret: String)? {
+    private func uploadEndpoint() -> URL? {
         guard let rawEndpoint = Bundle.main.object(forInfoDictionaryKey: "AETHER_BETA_TELEMETRY_ENDPOINT") as? String,
               let endpoint = URL(string: rawEndpoint.trimmingCharacters(in: .whitespacesAndNewlines)),
-              ["https", "http"].contains(endpoint.scheme?.lowercased() ?? ""),
-              let secret = Bundle.main.object(forInfoDictionaryKey: "AETHER_BETA_TELEMETRY_HMAC_SECRET") as? String,
-              secret.count >= 32,
-              !secret.contains("$(") else { return nil }
-        return (endpoint, secret)
+              endpoint.scheme?.lowercased() == "https" else { return nil }
+        return endpoint
     }
 
-    private func hmacSignature(secret: String, timestamp: String, body: Data) -> String {
-        var signed = Data(timestamp.utf8)
-        signed.append(0x2E)
-        signed.append(body)
-        let key = SymmetricKey(data: Data(secret.utf8))
-        let code = HMAC<SHA256>.authenticationCode(for: signed, using: key)
-        return "sha256=" + Data(code).map { String(format: "%02x", $0) }.joined()
+    private func upload(
+        _ upload: AetherPendingContributorUpload,
+        to endpoint: URL,
+        token: String
+    ) async throws -> (data: Data, response: HTTPURLResponse) {
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 30
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.httpBody = upload.body
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw AetherModelDeliveryError.manifestRequestFailed("No telemetry HTTP response.")
+        }
+        return (data, http)
     }
 
     private func scheduleRetry() {
@@ -370,12 +381,18 @@ final class AetherBetaTelemetry {
     private func persistPendingUpload() {
         guard let pendingUpload,
               let data = try? encoder.encode(pendingUpload) else { return }
-        try? data.write(to: pendingUploadURL, options: .atomic)
+        try? data.write(
+            to: pendingUploadURL,
+            options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
+        )
     }
 
     private func persist() {
         guard let data = try? encoder.encode(events) else { return }
-        try? data.write(to: fileURL, options: .atomic)
+        try? data.write(
+            to: fileURL,
+            options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
+        )
     }
 
     private var appVersion: String {
