@@ -14,10 +14,6 @@ final class CanopySubscriptionManager: ObservableObject {
     @Published private(set) var testAccessUnlocked = UserDefaults.standard.bool(forKey: CanopySubscriptionManager.testAccessKey)
     @Published var errorMessage: String?
 
-    #if DEBUG
-    @Published var debugUnlocked = false
-    #endif
-
     private var updatesTask: Task<Void, Never>?
 
     var monthlyProduct: Product? {
@@ -33,11 +29,7 @@ final class CanopySubscriptionManager: ObservableObject {
     }
 
     var hasPremiumAccess: Bool {
-        #if DEBUG
-        return isSubscribed || debugUnlocked || testAccessActive
-        #else
-        return isSubscribed || testAccessActive
-        #endif
+        isSubscribed || testAccessActive
     }
 
     var canRedeemTestAccessCode: Bool {
