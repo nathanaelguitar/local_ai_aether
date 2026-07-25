@@ -23,6 +23,30 @@ struct AetherColors {
     static let warmBlack   = Color(hex: "1A1208")
 }
 
+/// Shared press/disabled feedback for filled oak call-to-action buttons.
+/// The label supplies its own background/shape; this style only animates state.
+struct OakPrimaryButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(isEnabled ? (configuration.isPressed ? 0.88 : 1) : 0.55)
+            .scaleEffect(configuration.isPressed && isEnabled ? 0.975 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
+/// Press feedback for quiet text/outline buttons.
+struct OakQuietButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(isEnabled ? (configuration.isPressed ? 0.5 : 1) : 0.4)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
 extension Color {
     init(hex: String) {
         let hex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)

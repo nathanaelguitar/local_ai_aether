@@ -318,6 +318,7 @@ class AppState: ObservableObject {
         self.conversations = savedConversations.isEmpty
             ? sampleConversations
             : savedConversations.map(Self.canonicalizeBuiltInWorkspace).map(AetherTitleGenerator.repairIfNeeded)
+        restoreOriginalPinnedSeedIfNeeded()
         removeLegacySeedConversations()
         persistAllConversations()
         loadRecentlyDeleted()
@@ -985,6 +986,29 @@ class AppState: ObservableObject {
         }
     }
 
+    /// Restores the original pinned starter chat after the temporary launch-plan seed.
+    /// Only the untouched stock conversation is migrated; user-created conversations
+    /// with a similar title or content are left alone.
+    private func restoreOriginalPinnedSeedIfNeeded() {
+        guard let index = conversations.firstIndex(where: {
+            $0.title == "Two-Week Launch Plan" &&
+            $0.messages.first?.role == .user &&
+            $0.messages.first?.content == "Help me plan a small product launch in two weeks."
+        }) else { return }
+
+        var restored = conversations[index]
+        restored.title = "Morning Reflection"
+        restored.workspace = .personal
+        restored.persona = .default
+        restored.isPinned = true
+        restored.previewText = "What does a good day look like for you?"
+        restored.messages = [
+            ChatMessage(role: .user, content: "I want to reflect on my goals this week."),
+            ChatMessage(role: .assistant, content: "What does a good day look like for you?")
+        ]
+        conversations[index] = restored
+    }
+
     private func redirectedSystemPrompt(afterRepeatedResponse response: String, latestUserText: String) -> String {
         var parts = [String]()
         let basePrompt = runtimeSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1256,37 +1280,11 @@ enum AetherTitleGenerator {
 }
 
 let sampleConversations: [Conversation] = [
-    Conversation(title: "Two-Week Launch Plan", workspace: .work, persona: .analytical,
-                 isPinned: true, previewText: "Working backward from release day, here's your two-week plan...", updatedAt: Date().addingTimeInterval(-540),
+    Conversation(title: "Morning Reflection", workspace: .personal, persona: .default,
+                 isPinned: true, previewText: "What does a good day look like for you?", updatedAt: Date(),
                  messages: [
-                     ChatMessage(role: .user, content: "Help me plan a small product launch in two weeks.", timestamp: Date().addingTimeInterval(-660)),
-                     ChatMessage(role: .assistant, content: """
-                     Working backward from release day, here's your two-week plan:
-
-                     **Week 1 — decide and prepare**
-                     - Lock pricing and positioning by Wednesday
-                     - Draft the announcement and a one-page FAQ
-                     - Line up 3 early customers for launch-day quotes
-
-                     **Week 2 — polish and ship**
-                     - Finish support docs and a rollback plan
-                     - Schedule the announcement for Tuesday morning
-                     - Hold Friday as a buffer for anything that slips
-
-                     Want me to expand any of these into daily tasks?
-                     """, timestamp: Date().addingTimeInterval(-600)),
-                     ChatMessage(role: .user, content: "Yes, break down week 1 for me.", timestamp: Date().addingTimeInterval(-570)),
-                     ChatMessage(role: .assistant, content: """
-                     Here's week 1, day by day:
-
-                     - **Monday** — write down the one sentence you want customers to repeat about the product
-                     - **Tuesday** — pressure-test pricing against your two closest competitors
-                     - **Wednesday** — lock both; no more changes after today
-                     - **Thursday** — draft the announcement while decisions are fresh
-                     - **Friday** — send the draft to your three early customers and ask for quotes
-
-                     The Wednesday lock is the one that matters — everything downstream depends on it.
-                     """, timestamp: Date().addingTimeInterval(-540))
+                     ChatMessage(role: .user, content: "I want to reflect on my goals this week."),
+                     ChatMessage(role: .assistant, content: "What does a good day look like for you?")
                  ]),
     Conversation(title: "Coffee Before the Market", workspace: .personal, persona: .default,
                  previewText: "Two good options within a short walk of the market...", updatedAt: Date().addingTimeInterval(-3600),

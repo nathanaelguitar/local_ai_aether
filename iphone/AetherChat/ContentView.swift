@@ -8,46 +8,55 @@ struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
-        Group {
-            if showConversations {
-                if subscription.hasPremiumAccess {
-                    ConversationListView()
-                        .environmentObject(state)
-                        .environmentObject(subscription)
-                        .transition(.asymmetric(
-                            insertion: .move(edge: .trailing),
-                            removal: .move(edge: .leading)
-                        ))
-                } else {
-                    PaywallView()
-                        .environmentObject(subscription)
-                        .transition(.opacity)
-                }
-            } else {
-                WelcomeView(onEnter: {
-                    if CanopyContributorProgram.isContributorBuild,
-                       !CanopyContributorProgram.hasAcknowledgedDisclosure {
-                        showingContributorDisclosure = true
+        ZStack {
+            Group {
+                if showConversations {
+                    if subscription.hasPremiumAccess {
+                        ConversationListView()
+                            .environmentObject(state)
+                            .environmentObject(subscription)
+                            .transition(.asymmetric(
+                                insertion: .move(edge: .trailing),
+                                removal: .move(edge: .leading)
+                            ))
                     } else {
-                        enterApp()
+                        PaywallView()
+                            .environmentObject(subscription)
+                            .transition(.opacity)
                     }
-                })
-                .transition(.asymmetric(
-                    insertion: .move(edge: .leading),
-                    removal: .move(edge: .leading)
-                ))
+                } else {
+                    WelcomeView(onEnter: {
+                        if CanopyContributorProgram.isContributorBuild,
+                           !CanopyContributorProgram.hasAcknowledgedDisclosure {
+                            showingContributorDisclosure = true
+                        } else {
+                            enterApp()
+                        }
+                    })
+                    .transition(.asymmetric(
+                        insertion: .move(edge: .leading),
+                        removal: .move(edge: .leading)
+                    ))
+                }
+            }
+            .animation(.easeInOut(duration: 0.4), value: showConversations)
+
+            if showingContributorDisclosure {
+                ContributorConsentOverlay(
+                    onAgree: {
+                        CanopyContributorProgram.acknowledgeDisclosure()
+                        showingContributorDisclosure = false
+                        enterApp()
+                    },
+                    onDismiss: {
+                        showingContributorDisclosure = false
+                    }
+                )
+                .transition(.opacity.combined(with: .scale(scale: 0.95)))
+                .zIndex(2)
             }
         }
-        .animation(.easeInOut(duration: 0.4), value: showConversations)
-        .sheet(isPresented: $showingContributorDisclosure) {
-            ContributorDisclosureSheet {
-                CanopyContributorProgram.acknowledgeDisclosure()
-                enterApp()
-            }
-            .presentationDetents([.medium, .large])
-            .presentationDragIndicator(.visible)
-            .presentationCornerRadius(32)
-        }
+        .animation(.spring(response: 0.32, dampingFraction: 0.86), value: showingContributorDisclosure)
         .onChange(of: scenePhase) { _, phase in
             state.appIsActive = phase == .active
             if phase == .active {
@@ -63,154 +72,158 @@ struct ContentView: View {
     }
 }
 
-private struct ContributorDisclosureSheet: View {
-    @Environment(\.dismiss) private var dismiss
+/// Compact contributor consent card. Tap outside or "Not now" to dismiss without
+/// consenting; only the explicit agree button acknowledges the disclosure.
+private struct ContributorConsentOverlay: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.openURL) private var openURL
 
-    let onContinue: () -> Void
+    let onAgree: () -> Void
+    let onDismiss: () -> Void
+
+    private var isDark: Bool { colorScheme == .dark }
 
     private var panelBackground: Color {
-        colorScheme == .dark ? AetherColors.warmGray900 : AetherColors.oakCream
+        isDark ? AetherColors.warmGray900 : AetherColors.oakCream
     }
 
     private var primaryText: Color {
-        colorScheme == .dark ? AetherColors.oakCream : AetherColors.warmBlack
+        isDark ? AetherColors.oakCream : AetherColors.warmBlack
     }
 
     private var secondaryText: Color {
-        colorScheme == .dark ? AetherColors.warmGray400 : AetherColors.warmGray600
+        isDark ? AetherColors.warmGray400 : AetherColors.warmGray600
     }
 
     var body: some View {
-        ScrollView {
+        ZStack {
+            Color.black.opacity(isDark ? 0.6 : 0.4)
+                .ignoresSafeArea()
+                .onTapGesture(perform: onDismiss)
+                .accessibilityLabel("Dismiss contributor consent")
+                .accessibilityAddTraits(.isButton)
+
             VStack(alignment: .leading, spacing: 0) {
-                HStack(spacing: 14) {
+                HStack(spacing: 12) {
                     ZStack {
                         Circle()
-                            .fill(AetherColors.forestMedium.opacity(colorScheme == .dark ? 0.35 : 0.16))
-                            .frame(width: 52, height: 52)
+                            .fill(AetherColors.forestMedium.opacity(isDark ? 0.35 : 0.16))
+                            .frame(width: 44, height: 44)
                         Image(systemName: "leaf.fill")
-                            .font(.system(size: 23, weight: .semibold))
+                            .font(.system(size: 19, weight: .semibold))
                             .foregroundStyle(AetherColors.forestMedium)
                     }
+                    .accessibilityHidden(true)
 
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("CANOPYCHAT CONTRIBUTOR BETA")
-                            .font(.system(size: 11, weight: .bold, design: .rounded))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("CONTRIBUTOR BETA")
+                            .font(.system(size: 10, weight: .bold, design: .rounded))
                             .tracking(1.1)
                             .foregroundStyle(AetherColors.forestMedium)
-                        Text("Help shape the next model")
-                            .font(.system(size: 26, weight: .semibold, design: .serif))
+                        Text("Help improve CanopyChat")
+                            .font(.system(size: 20, weight: .semibold, design: .serif))
                             .foregroundStyle(primaryText)
+                            .minimumScaleFactor(0.8)
                     }
                 }
 
-                Text("You get early access while helping us find where CanopyChat can be more accurate, useful, and reliable.")
-                    .font(.system(size: 16, weight: .regular))
-                    .foregroundStyle(secondaryText)
-                    .lineSpacing(3)
-                    .padding(.top, 20)
-
-                VStack(spacing: 10) {
-                    DisclosureDetailRow(
+                VStack(alignment: .leading, spacing: 10) {
+                    ConsentPoint(
                         icon: "arrow.up.doc.fill",
-                        title: "Selected examples are shared",
-                        detail: "We collect failures, corrections, regenerations, web-search signals, and a small comparison sample."
+                        text: "Selected prompts, responses, failures, corrections, regenerations, and comparison samples may be collected to improve the model.",
+                        secondaryText: secondaryText
                     )
-                    DisclosureDetailRow(
+                    ConsentPoint(
                         icon: "lock.fill",
-                        title: "Not your entire history",
-                        detail: "Attachments and full chat histories are not included in contributor uploads."
+                        text: "Attachments and full chat histories are never included.",
+                        secondaryText: secondaryText
                     )
-                    DisclosureDetailRow(
+                    ConsentPoint(
                         icon: "slider.horizontal.3",
-                        title: "You stay in control",
-                        detail: "You can stop contributing in Settings at any time. Unsent contributor data is deleted."
+                        text: "Withdraw anytime in Settings — unsent contributor data is deleted immediately.",
+                        secondaryText: secondaryText
                     )
                 }
-                .padding(.top, 22)
-
-                Text("By continuing, you agree to share selected interactions for model evaluation and improvement during this Contributor Beta.")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(secondaryText)
-                    .lineSpacing(2)
-                    .padding(.top, 20)
+                .padding(.top, 16)
 
                 Button {
                     openURL(CanopyLegal.privacyPolicyURL)
                 } label: {
-                    Label("Read the Contributor Privacy Policy", systemImage: "arrow.up.right")
-                        .font(.system(size: 13, weight: .semibold))
+                    Label("Contributor Privacy Policy", systemImage: "arrow.up.right")
+                        .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(AetherColors.forestMedium)
                 }
-                .padding(.top, 10)
+                .buttonStyle(OakQuietButtonStyle())
+                .padding(.top, 12)
 
-                Button {
-                    dismiss()
-                    DispatchQueue.main.async {
-                        onContinue()
-                    }
-                } label: {
-                    Text("Join the Contributor Beta")
-                        .font(.system(size: 17, weight: .bold))
+                Button(action: onAgree) {
+                    Text("I Understand — Continue")
+                        .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
-                        .frame(height: 56)
-                        .background(AetherColors.oakMedium)
-                        .clipShape(RoundedRectangle(cornerRadius: 17, style: .continuous))
+                        .frame(height: 50)
+                        .background(
+                            LinearGradient(
+                                colors: [AetherColors.forestMedium, Color(hex: "2F5233")],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+                        .shadow(color: Color(hex: "2F5233").opacity(0.4), radius: 8, y: 3)
                 }
-                .padding(.top, 26)
+                .buttonStyle(OakPrimaryButtonStyle())
+                .accessibilityHint("Agrees to share selected interactions and opens CanopyChat")
+                .padding(.top, 18)
 
-                Button("Not now") {
-                    dismiss()
-                }
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(secondaryText)
-                .frame(maxWidth: .infinity)
-                .padding(.top, 16)
-                .padding(.bottom, 8)
+                Button("Not now", action: onDismiss)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(secondaryText)
+                    .buttonStyle(OakQuietButtonStyle())
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 10)
             }
-            .padding(.horizontal, 24)
-            .padding(.top, 18)
+            .padding(22)
+            .frame(maxWidth: 340)
+            .background(panelBackground)
+            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .strokeBorder(
+                        isDark ? Color.white.opacity(0.1) : AetherColors.oakPale.opacity(0.7),
+                        lineWidth: 1
+                    )
+            )
+            .shadow(color: AetherColors.oakDark.opacity(isDark ? 0.6 : 0.25), radius: 30, y: 12)
+            .padding(.horizontal, 28)
+            .accessibilityAddTraits(.isModal)
         }
-        .background(panelBackground)
     }
 }
 
-private struct DisclosureDetailRow: View {
+private struct ConsentPoint: View {
     @Environment(\.colorScheme) private var colorScheme
     let icon: String
-    let title: String
-    let detail: String
+    let text: String
+    let secondaryText: Color
 
     var body: some View {
-        HStack(alignment: .top, spacing: 13) {
+        HStack(alignment: .top, spacing: 10) {
             Image(systemName: icon)
-                .font(.system(size: 15, weight: .semibold))
+                .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(AetherColors.oakMedium)
-                .frame(width: 34, height: 34)
+                .frame(width: 24, height: 24)
                 .background(AetherColors.oakPale.opacity(colorScheme == .dark ? 0.14 : 0.45))
                 .clipShape(Circle())
+                .accessibilityHidden(true)
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(colorScheme == .dark ? AetherColors.oakCream : AetherColors.warmBlack)
-                Text(detail)
-                    .font(.system(size: 13, weight: .regular))
-                    .foregroundStyle(colorScheme == .dark ? AetherColors.warmGray400 : AetherColors.warmGray600)
-                    .lineSpacing(2)
-            }
+            Text(text)
+                .font(.system(size: 13, weight: .regular))
+                .foregroundStyle(secondaryText)
+                .lineSpacing(2)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .background(colorScheme == .dark ? AetherColors.warmGray800.opacity(0.8) : Color.white.opacity(0.56))
-        .overlay {
-            RoundedRectangle(cornerRadius: 17, style: .continuous)
-                .stroke(AetherColors.oakPale.opacity(colorScheme == .dark ? 0.12 : 0.65), lineWidth: 1)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 17, style: .continuous))
     }
 }
 

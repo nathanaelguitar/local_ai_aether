@@ -158,13 +158,13 @@ struct SettingsView: View {
                         }
 
                         if CanopyContributorProgram.isContributorBuild {
-                            SettingsSection(title: "Beta Program") {
+                            SettingsSection(title: "Beta Program", footer: "Turn this off anytime to stop contributing. Unsent contributor data is deleted immediately.") {
                                 VStack(spacing: 0) {
                                     Toggle(isOn: contributorTelemetryBinding) {
                                         SettingsRowLabel(
                                             icon: "chart.bar.xaxis",
                                             title: "Help improve CanopyChat",
-                                            subtitle: "Share selected beta failures and a small comparison sample"
+                                            subtitle: "Share selected prompts, responses, failures, corrections, regenerations, and a small comparison sample"
                                         )
                                     }
                                     .tint(AetherColors.oakMedium)
@@ -281,17 +281,26 @@ struct SettingsView: View {
 
 struct SettingsSection<Content: View>: View {
     let title: String
+    let footer: String?
     let content: Content
-    init(title: String, @ViewBuilder content: () -> Content) {
-        self.title = title; self.content = content()
+    init(title: String, footer: String? = nil, @ViewBuilder content: () -> Content) {
+        self.title = title; self.footer = footer; self.content = content()
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title.uppercased())
                 .font(.system(size: 11, weight: .semibold))
+                .tracking(0.8)
                 .foregroundColor(AetherColors.oakMedium)
                 .padding(.leading, 4)
             content
+            if let footer {
+                Text(footer)
+                    .font(.system(size: 12))
+                    .foregroundColor(AetherColors.warmGray500)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.leading, 4)
+            }
         }
     }
 }
@@ -448,7 +457,8 @@ struct SettingsRowLabel: View {
                 Text(subtitle)
                     .font(.system(size: 12))
                     .foregroundColor(AetherColors.warmGray500)
-                    .lineLimit(2)
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Spacer()
         }
@@ -880,17 +890,24 @@ struct RecentlyDeletedView: View {
         NavigationStack {
             OakBackground {
                 if state.recentlyDeleted.isEmpty {
-                    VStack(spacing: 12) {
-                        Image(systemName: "trash.slash")
-                            .font(.system(size: 44))
-                            .foregroundColor(AetherColors.warmGray400)
+                    VStack(spacing: 14) {
+                        ZStack {
+                            Circle()
+                                .fill(AetherColors.warmGray400.opacity(state.isDarkTheme ? 0.18 : 0.14))
+                                .frame(width: 84, height: 84)
+                            Image(systemName: "trash.slash")
+                                .font(.system(size: 32, weight: .medium))
+                                .foregroundColor(AetherColors.warmGray400)
+                        }
+                        .accessibilityHidden(true)
                         Text("Nothing here")
-                            .font(.system(size: 17, weight: .medium))
-                            .foregroundColor(AetherColors.warmGray600)
+                            .font(.system(size: 20, weight: .medium, design: .serif))
+                            .foregroundColor(state.isDarkTheme ? AetherColors.oakCream : AetherColors.warmBlack)
                         Text("Deleted chats stay here for \(AppState.deletedRetentionDays) days before they're removed for good.")
                             .font(.system(size: 14))
                             .foregroundColor(AetherColors.warmGray500)
                             .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
                             .padding(.horizontal, 40)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)

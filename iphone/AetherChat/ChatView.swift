@@ -1966,13 +1966,24 @@ struct ChatEmptyState: View {
     let personaName: String
     let isDark: Bool
     var body: some View {
-        VStack(spacing: 16) {
-            Spacer(minLength: 80)
-            Text("🌿")
-                .font(.system(size: 60))
+        VStack(spacing: 14) {
+            Spacer(minLength: 72)
+            ZStack {
+                Circle()
+                    .fill(AetherColors.forestMedium.opacity(isDark ? 0.2 : 0.12))
+                    .frame(width: 84, height: 84)
+                Image(systemName: "leaf.fill")
+                    .font(.system(size: 34, weight: .medium))
+                    .foregroundColor(AetherColors.forestMedium)
+            }
+            .accessibilityHidden(true)
             Text("Begin your conversation with \(personaName)")
-                .font(.system(size: 15))
-                .foregroundColor(isDark ? AetherColors.warmGray500 : AetherColors.warmGray600)
+                .font(.system(size: 17, weight: .medium, design: .serif))
+                .foregroundColor(isDark ? AetherColors.oakCream : AetherColors.warmBlack)
+                .multilineTextAlignment(.center)
+            Text("Ask anything — answers run on your device.")
+                .font(.system(size: 14))
+                .foregroundColor(isDark ? AetherColors.warmGray400 : AetherColors.warmGray500)
                 .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)

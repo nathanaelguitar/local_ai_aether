@@ -353,28 +353,44 @@ struct ConversationRow: View {
 }
 
 struct EmptyGrove: View {
+    @Environment(\.colorScheme) private var colorScheme
     let onNewChat: () -> Void
+
+    private var isDark: Bool { colorScheme == .dark }
+
     var body: some View {
-        VStack(spacing: 16) {
-            Spacer(minLength: 60)
-            Image(systemName: "bubble.left.and.bubble.right")
-                .font(.system(size: 52))
-                .foregroundColor(AetherColors.warmGray400)
-            Text("Your grove is quiet")
-                .font(.system(size: 17, weight: .medium))
-                .foregroundColor(AetherColors.warmGray600)
-            Text("Start a new conversation to begin")
-                .font(.system(size: 14))
-                .foregroundColor(AetherColors.warmGray500)
-            Button(action: onNewChat) {
-                Text("Plant a new seed")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundColor(AetherColors.oakMedium)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 10)
-                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(AetherColors.oakMedium, lineWidth: 1.5))
+        VStack(spacing: 14) {
+            Spacer(minLength: 48)
+            ZStack {
+                Circle()
+                    .fill(AetherColors.forestMedium.opacity(isDark ? 0.2 : 0.12))
+                    .frame(width: 88, height: 88)
+                Image(systemName: "leaf.fill")
+                    .font(.system(size: 36, weight: .medium))
+                    .foregroundColor(AetherColors.forestMedium)
             }
+            .accessibilityHidden(true)
+            Text("Your grove is quiet")
+                .font(.system(size: 20, weight: .medium, design: .serif))
+                .foregroundColor(isDark ? AetherColors.oakCream : AetherColors.warmBlack)
+            Text("Start a conversation and it will grow here.")
+                .font(.system(size: 14))
+                .foregroundColor(isDark ? AetherColors.warmGray400 : AetherColors.warmGray500)
+                .multilineTextAlignment(.center)
+            Button(action: onNewChat) {
+                Label("Plant a new seed", systemImage: "plus")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 22)
+                    .padding(.vertical, 12)
+                    .background(AetherColors.oakMedium)
+                    .clipShape(Capsule())
+                    .shadow(color: AetherColors.oakDark.opacity(isDark ? 0.4 : 0.22), radius: 8, y: 3)
+            }
+            .buttonStyle(OakPrimaryButtonStyle())
+            .padding(.top, 6)
         }
         .frame(maxWidth: .infinity)
+        .padding(.horizontal, 32)
     }
 }

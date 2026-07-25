@@ -25,6 +25,7 @@ enum CanopyContributorProgram {
 
     static func stopContributing() {
         AetherBetaTelemetry.shared.setEnabled(false)
+        UserDefaults.standard.removeObject(forKey: disclosureAcknowledgedKey)
     }
 
     static let disclosure = """
