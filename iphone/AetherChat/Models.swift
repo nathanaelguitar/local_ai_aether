@@ -318,8 +318,10 @@ class AppState: ObservableObject {
         self.conversations = savedConversations.isEmpty
             ? sampleConversations
             : savedConversations.map(Self.canonicalizeBuiltInWorkspace).map(AetherTitleGenerator.repairIfNeeded)
-        restoreOriginalPinnedSeedIfNeeded()
-        removeLegacySeedConversations()
+        migrateStockConversationsIfNeeded()
+        // Seed conversations are intentionally preserved. Keep the old cleanup
+        // routine below for reference, but never delete user-visible chats at launch.
+        // removeLegacySeedConversations()
         persistAllConversations()
         loadRecentlyDeleted()
         purgeExpiredDeletedConversations()
@@ -969,44 +971,50 @@ class AppState: ObservableObject {
     }
 
     private func removeLegacySeedConversations() {
-        let legacySeedTitles: Set<String> = [
-            "Morning Reflection",
-            "Q3 Strategy Deck",
-            "Novel Outline",
-            "ML Paper Notes"
-        ]
-        let removedIDs = conversations
-            .filter { legacySeedTitles.contains($0.title) }
-            .map(\.id)
-        guard !removedIDs.isEmpty else { return }
-
-        conversations.removeAll { legacySeedTitles.contains($0.title) }
-        for id in removedIDs {
-            memoryStore.deleteConversation(id: id)
-        }
+        // Disabled intentionally. Seed cleanup must never delete conversations
+        // from a user's local store. If a future migration is needed, add an
+        // explicit, non-destructive migration keyed to a known seed record.
     }
 
-    /// Restores the original pinned starter chat after the temporary launch-plan seed.
-    /// Only the untouched stock conversation is migrated; user-created conversations
-    /// with a similar title or content are left alone.
-    private func restoreOriginalPinnedSeedIfNeeded() {
-        guard let index = conversations.firstIndex(where: {
-            $0.title == "Two-Week Launch Plan" &&
-            $0.messages.first?.role == .user &&
-            $0.messages.first?.content == "Help me plan a small product launch in two weeks."
-        }) else { return }
-
-        var restored = conversations[index]
-        restored.title = "Morning Reflection"
-        restored.workspace = .personal
-        restored.persona = .default
-        restored.isPinned = true
-        restored.previewText = "What does a good day look like for you?"
-        restored.messages = [
-            ChatMessage(role: .user, content: "I want to reflect on my goals this week."),
-            ChatMessage(role: .assistant, content: "What does a good day look like for you?")
+    /// Migrates only the untouched built-in examples. User-created or edited
+    /// conversations are left intact, and no local conversations are deleted.
+    private func migrateStockConversationsIfNeeded() {
+        let migrations: [(oldTitle: String, oldPrompt: String, newTitle: String)] = [
+            ("Two-Week Launch Plan", "Help me plan a small product launch in two weeks.", "Morning Reflection"),
+            ("Coffee Before the Market", "Find a quiet coffee shop near the farmers market that opens early.", "Dinner From What's Left"),
+            ("Eco Brand Taglines", "Write taglines for a refill shop that cuts single-use plastic.", "Are These Leftovers Still Good?"),
+            ("Customer Follow-Up Email", "Draft a friendly follow-up email to a customer who went quiet after a demo.", "A Text I Keep Putting Off"),
+            ("Reading a Nutrition Label", "This granola says: serving 1/4 cup, sugar 11g, ingredients: whole oats, cane sugar, honey, brown rice syrup, almonds. Is it actually healthy?", "Making Sense of a Car Repair Quote")
         ]
-        conversations[index] = restored
+
+        var migratedAny = false
+        for migration in migrations {
+            guard let index = conversations.firstIndex(where: {
+                $0.title == migration.oldTitle &&
+                $0.messages.first?.role == .user &&
+                $0.messages.first?.content == migration.oldPrompt
+            }), let replacement = sampleConversations.first(where: { $0.title == migration.newTitle }) else {
+                continue
+            }
+
+            let existingID = conversations[index].id
+            conversations[index] = Conversation(
+                id: existingID,
+                title: replacement.title,
+                workspace: replacement.workspace,
+                persona: replacement.persona,
+                isPinned: replacement.isPinned,
+                previewText: replacement.previewText,
+                updatedAt: replacement.updatedAt,
+                messages: replacement.messages,
+                memorySummary: replacement.memorySummary
+            )
+            migratedAny = true
+        }
+
+        if migratedAny && !conversations.contains(where: { $0.title == "Morning Reflection" }) {
+            conversations.insert(sampleConversations[0], at: 0)
+        }
     }
 
     private func redirectedSystemPrompt(afterRepeatedResponse response: String, latestUserText: String) -> String {
@@ -1286,72 +1294,67 @@ let sampleConversations: [Conversation] = [
                      ChatMessage(role: .user, content: "I want to reflect on my goals this week."),
                      ChatMessage(role: .assistant, content: "What does a good day look like for you?")
                  ]),
-    Conversation(title: "Coffee Before the Market", workspace: .personal, persona: .default,
-                 previewText: "Two good options within a short walk of the market...", updatedAt: Date().addingTimeInterval(-3600),
+    Conversation(title: "Dinner From What's Left", workspace: .personal, persona: .default,
+                 previewText: "That's enough for a solid one-pan dinner...", updatedAt: Date().addingTimeInterval(-3600),
                  messages: [
-                     ChatMessage(role: .user, content: "Find a quiet coffee shop near the farmers market that opens early.", timestamp: Date().addingTimeInterval(-3660)),
+                     ChatMessage(role: .user, content: "I have chicken thighs, half an onion, rice, and a lemon. What can I make for dinner?", timestamp: Date().addingTimeInterval(-3660)),
                      ChatMessage(role: .assistant, content: """
-                     Two good options within a short walk of the market:
+                     That's enough for a solid one-pan dinner — lemon chicken and rice:
 
-                     - **Grounded Coffee Co.** — opens 6:30am, known for quiet back room and pour-overs
-                     - **The Morning Bloom** — opens 7am, more seats, good pastries, gets busier after 9
+                     1. Salt the thighs and brown them skin-side down in an oven-safe pan, about 6 minutes. Set them aside.
+                     2. Cook the onion in the same pan until soft, then stir in the rice for a minute so it picks up the fat.
+                     3. Add 1½ cups water per cup of rice, squeeze in half the lemon, and nestle the chicken back on top.
+                     4. Cover and bake at 375°F for 25 minutes, then rest 5 minutes off the heat.
 
-                     If you want to talk before the market opens, Grounded is the safer bet.
-
-                     Sources
-                     - [Grounded Coffee Co. — hours and menu](https://example.com/grounded-coffee)
-                     - [The Morning Bloom — visitor reviews](https://example.com/morning-bloom)
+                     Squeeze the other lemon half over everything right before serving — that's what makes it taste finished rather than plain.
                      """, timestamp: Date().addingTimeInterval(-3600))
                  ]),
-    Conversation(title: "Eco Brand Taglines", workspace: .creative, persona: .creative,
-                 previewText: "Five taglines, from earnest to playful...", updatedAt: Date().addingTimeInterval(-9000),
+    Conversation(title: "Are These Leftovers Still Good?", workspace: .personal, persona: .concise,
+                 previewText: "Four days is the outer limit for cooked chicken...", updatedAt: Date().addingTimeInterval(-9000),
                  messages: [
-                     ChatMessage(role: .user, content: "Write taglines for a refill shop that cuts single-use plastic.", timestamp: Date().addingTimeInterval(-9060)),
+                     ChatMessage(role: .user, content: "How long is cooked chicken safe in the fridge? Mine's been in there since Sunday.", timestamp: Date().addingTimeInterval(-9060)),
                      ChatMessage(role: .assistant, content: """
-                     Five taglines, from earnest to playful:
+                     Four days is the outer limit for cooked chicken in the fridge at 40°F or below.
 
-                     1. **Refill more. Waste less.**
-                     2. **The last bottle you'll ever buy.**
-                     3. **Good habits, by the ounce.**
-                     4. **Bring the bottle. Skip the landfill.**
-                     5. **Your soap called. It wants a refill.**
+                     If Sunday was more than four days ago, throw it out — smell isn't a reliable test, since the bacteria that cause illness don't change how food looks or smells.
 
-                     Number 2 is the boldest claim — great on a storefront, but pair it with the refill count so it feels earned.
+                     To buy more time next round, freeze it within a day or two; it keeps for months at 0°F.
+
+                     Sources
+                     - [FoodSafety.gov — Cold Food Storage Chart](https://www.foodsafety.gov/food-safety-charts/cold-food-storage-charts)
                      """, timestamp: Date().addingTimeInterval(-9000))
                  ]),
-    Conversation(title: "Customer Follow-Up Email", workspace: .work, persona: .default,
-                 previewText: "Here's a short, friendly draft you can adjust...", updatedAt: Date().addingTimeInterval(-26_000),
+    Conversation(title: "A Text I Keep Putting Off", workspace: .creative, persona: .creative,
+                 previewText: "Here's a version that's warm but doesn't over-explain...", updatedAt: Date().addingTimeInterval(-26_000),
                  messages: [
-                     ChatMessage(role: .user, content: "Draft a friendly follow-up email to a customer who went quiet after a demo.", timestamp: Date().addingTimeInterval(-26_060)),
+                     ChatMessage(role: .user, content: "I need to cancel dinner plans with a friend tonight and I feel bad about it. Help me word the text.", timestamp: Date().addingTimeInterval(-26_060)),
                      ChatMessage(role: .assistant, content: """
-                     Here's a short, friendly draft you can adjust:
+                     Here's a version that's warm but doesn't over-explain:
 
-                     **Subject:** Following up on the demo
+                     "Hey — I'm so sorry, I have to bail on tonight. I'm running on empty and I'd be bad company. Can we do next week instead? I'll pick the place."
 
-                     Hi [Name],
+                     Three things it does on purpose:
 
-                     Thanks again for taking the time to see the product last week. I know things get busy, so no pressure — I just wanted to check whether any questions came up on your side.
+                     - **Apologizes once**, not three times — repeated apologies make the other person reassure you
+                     - **Gives a reason without an essay** — one honest line lands better than a paragraph of justification
+                     - **Offers the next date immediately**, so it reads as a reschedule, not a fade
 
-                     Happy to share pricing details or set up a quick call with your team whenever it's useful.
-
-                     Best,
-                     [Your name]
-
-                     The "no pressure" line does the real work — it makes replying feel easy instead of overdue.
+                     Want a shorter version, or one for a friend you cancel on often?
                      """, timestamp: Date().addingTimeInterval(-26_000))
                  ]),
-    Conversation(title: "Reading a Nutrition Label", workspace: .research, persona: .analytical,
-                 previewText: "From that label, three things stand out...", updatedAt: Date().addingTimeInterval(-90_000),
+    Conversation(title: "Making Sense of a Car Repair Quote", workspace: .research, persona: .analytical,
+                 previewText: "Three of those four lines are worth questioning...", updatedAt: Date().addingTimeInterval(-90_000),
                  messages: [
-                     ChatMessage(role: .user, content: "This granola says: serving 1/4 cup, sugar 11g, ingredients: whole oats, cane sugar, honey, brown rice syrup, almonds. Is it actually healthy?", timestamp: Date().addingTimeInterval(-90_060)),
+                     ChatMessage(role: .user, content: "The shop quoted me $1,240: brake pads and rotors $610, brake fluid flush $150, engine air filter $95, shop supplies $85, labor $300. Is any of that padding?", timestamp: Date().addingTimeInterval(-90_060)),
                      ChatMessage(role: .assistant, content: """
-                     From that label, three things stand out:
+                     Three of those four lines are worth questioning:
 
-                     - **Serving size is 1/4 cup** — most people pour 3-4x that, so the calories on the label roughly triple in practice
-                     - **Sugar is 11g per serving**, and two of the first four ingredients are sweeteners
-                     - **The fiber and whole oats are real** — that part of the front-label claim holds up
+                     - **Pads and rotors at $610** — reasonable if that covers all four wheels, high if it's only the front. Ask which axles are included before anything else.
+                     - **Engine air filter at $95** — the part itself is usually $20-30 and takes a few minutes to swap. This is the easiest line to decline and do yourself.
+                     - **Shop supplies at $85** — a percentage-based catch-all fee. Many shops will reduce or drop it if you ask.
+                     - **Brake fluid flush at $150** — legitimate maintenance, but only if it's actually due. Ask when it was last done.
 
-                     Verdict: closer to a dessert topping than a breakfast base. Use it as a yogurt topper rather than a bowl on its own.
+                     Ask for the itemized parts numbers and the labor hours. A shop that won't put those in writing is telling you something.
                      """, timestamp: Date().addingTimeInterval(-90_000))
                  ])
 ]
