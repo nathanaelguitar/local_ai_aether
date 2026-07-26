@@ -6,6 +6,8 @@ import androidx.lifecycle.viewModelScope
 import com.nathanaelguitar.canopychat.core.AssistantPersona
 import com.nathanaelguitar.canopychat.core.CanopyLocationService
 import com.nathanaelguitar.canopychat.core.CanopyNetworkMonitor
+import com.nathanaelguitar.canopychat.core.CanopyNotifications
+import com.nathanaelguitar.canopychat.core.ChatAttachment
 import com.nathanaelguitar.canopychat.core.ChatMessage
 import com.nathanaelguitar.canopychat.core.Conversation
 import com.nathanaelguitar.canopychat.core.InferenceProvider
@@ -20,6 +22,8 @@ import com.nathanaelguitar.canopychat.core.Workspace
 import com.nathanaelguitar.canopychat.inference.BackendInferenceEngine
 import com.nathanaelguitar.canopychat.inference.LlamaCppEngine
 import com.nathanaelguitar.canopychat.inference.ModelStore
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -42,20 +46,62 @@ class AppState(application: Application) : AndroidViewModel(application) {
     private val _conversations = MutableStateFlow<List<Conversation>>(emptyList())
     val conversations: StateFlow<List<Conversation>> = _conversations.asStateFlow()
 
+    /** In-flight generation, so stopSending() can cancel it. */
+    private var replyJob: Job? = null
+
+    /** Distinguishes a user-initiated stop from a cancellation caused by the next turn. */
+    private var stoppedByUser = false
+
+    /** Mirrors offlineWebNoticeShownConversationIDs on iOS. */
+    private val offlineWebNoticeShownConversationIds = mutableSetOf<UUID>()
+
     private val _generationStatus = MutableStateFlow<String?>(null)
     val generationStatus: StateFlow<String?> = _generationStatus.asStateFlow()
+
+    private val _modelLoadingMessage = MutableStateFlow<String?>(null)
+    val modelLoadingMessage: StateFlow<String?> = _modelLoadingMessage.asStateFlow()
 
     private val _isSending = MutableStateFlow(false)
     val isSending: StateFlow<Boolean> = _isSending.asStateFlow()
 
-    val apiEndpoint = MutableStateFlow(prefs.getString("apiEndpoint", "") ?: "")
+    /** Mirrors AppState.appIsActive on iOS; drives the background-reply notification. */
+    private val _appIsActive = MutableStateFlow(true)
+    val appIsActive: StateFlow<Boolean> = _appIsActive.asStateFlow()
+
+    // iOS defaults to http://127.0.0.1:8787; 10.0.2.2 is that host as seen from an emulator.
+    val apiEndpoint = MutableStateFlow(prefs.getString("apiEndpoint", "http://10.0.2.2:8787") ?: "")
     val customSystemPrompt = MutableStateFlow(prefs.getString("customSystemPrompt", "") ?: "")
     val inferenceProvider = MutableStateFlow(InferenceProvider.from(prefs.getString("inferenceProvider", null)))
     val isDarkTheme = MutableStateFlow(prefs.getBoolean("isDarkTheme", false))
     val defaultWorkspaceId = MutableStateFlow(prefs.getString("defaultWorkspaceId", "personal") ?: "personal")
+    val messageFontScale = MutableStateFlow(
+        prefs.getFloat("messageFontScale", 1.0f).toDouble().takeIf { it > 0.0 } ?: 1.0
+    )
 
-    private var customWorkspaces = loadWorkspaces()
-    private var customPersonas = loadPersonas()
+    /**
+     * Mirrors AppState.selectedModel on iOS, including the "Aether V1" → "Canopy V1"
+     * migration for installs that predate the rename.
+     */
+    val selectedModel = MutableStateFlow(
+        prefs.getString("selectedModel", null)
+            ?.takeIf { it != ModelCatalog.LEGACY_DISPLAY_NAME }
+            ?: ModelCatalog.CANOPY_V1_DISPLAY_NAME
+    )
+
+    // StateFlow-backed so Compose recomposes when a custom workspace/assistant is
+    // created, edited, or deleted.
+    private val _customWorkspaces = MutableStateFlow(loadWorkspaces())
+    private val _customPersonas = MutableStateFlow(loadPersonas())
+
+    private var customWorkspaces: List<Workspace>
+        get() = _customWorkspaces.value
+        set(value) { _customWorkspaces.value = value }
+    private var customPersonas: List<AssistantPersona>
+        get() = _customPersonas.value
+        set(value) { _customPersonas.value = value }
+
+    val workspacesFlow: StateFlow<List<Workspace>> = _customWorkspaces.asStateFlow()
+    val personasFlow: StateFlow<List<AssistantPersona>> = _customPersonas.asStateFlow()
 
     val availableWorkspaces: List<Workspace> get() = Workspace.BUILT_INS + customWorkspaces
     val availablePersonas: List<AssistantPersona>
@@ -73,6 +119,46 @@ class AppState(application: Application) : AndroidViewModel(application) {
         } else {
             saved.map(::canonicalizeConversation).map(TitleGenerator::repairIfNeeded)
         }
+        removeLegacySeedConversations()
+    }
+
+    /**
+     * Mirrors AppState.selectedModel's didSet on iOS: selecting the bundled model
+     * also forces the on-device provider.
+     */
+    fun setSelectedModel(model: String) {
+        selectedModel.value = model
+        prefs.edit().putString("selectedModel", model).apply()
+        if (model == ModelCatalog.CANOPY_V1_DISPLAY_NAME) {
+            setInferenceProvider(InferenceProvider.ON_DEVICE)
+        }
+    }
+
+    fun setMessageFontScale(scale: Double) {
+        val clamped = scale.coerceIn(0.85, 1.35)
+        messageFontScale.value = clamped
+        prefs.edit().putFloat("messageFontScale", clamped.toFloat()).apply()
+    }
+
+    fun setAppIsActive(active: Boolean) {
+        _appIsActive.value = active
+    }
+
+    /**
+     * Port of removeLegacySeedConversations in iphone/AetherChat/Models.swift — drops
+     * the pre-rename starter chats so upgrading installs don't keep stale samples.
+     */
+    private fun removeLegacySeedConversations() {
+        val legacySeedTitles = setOf(
+            "Morning Reflection",
+            "Q3 Strategy Deck",
+            "Novel Outline",
+            "ML Paper Notes"
+        )
+        val removed = _conversations.value.filter { legacySeedTitles.contains(it.title) }
+        if (removed.isEmpty()) return
+        _conversations.value = _conversations.value.filterNot { legacySeedTitles.contains(it.title) }
+        removed.forEach { memoryStore.deleteConversation(it.id) }
     }
 
     fun setDarkTheme(enabled: Boolean) {
@@ -189,7 +275,7 @@ class AppState(application: Application) : AndroidViewModel(application) {
         updateConversation(id) { it.copy(title = title.trim().ifEmpty { "Untitled" }) }
     }
 
-    fun sendMessage(conversationId: UUID, text: String, attachments: List<com.nathanaelguitar.canopychat.core.ChatAttachment> = emptyList()) {
+    fun sendMessage(conversationId: UUID, text: String, attachments: List<ChatAttachment> = emptyList()) {
         val conversation = _conversations.value.firstOrNull { it.id == conversationId } ?: return
         val priorMessages = conversation.messages
         val userMessage = ChatMessage(role = MessageRole.USER, content = text, attachments = attachments)
@@ -199,21 +285,99 @@ class AppState(application: Application) : AndroidViewModel(application) {
             current.copy(
                 title = title,
                 messages = current.messages + userMessage,
-                previewText = text.ifBlank { attachments.firstOrNull()?.displayName ?: "Attachment" },
+                previewText = text.ifBlank { attachmentPreview(attachments) },
                 updatedAtMillis = System.currentTimeMillis(),
                 memorySummary = MemoryPlanner.summary(current.messages + userMessage, current.memorySummary)
             )
         }
 
-        viewModelScope.launch {
+        launchReply(conversationId, priorMessages, text)
+    }
+
+    /**
+     * Port of editUserMessage in iphone/AetherChat/Models.swift — rewrites a user turn,
+     * truncates everything after it, and regenerates from that point.
+     */
+    fun editUserMessage(conversationId: UUID, messageId: UUID, text: String) {
+        val conversation = _conversations.value.firstOrNull { it.id == conversationId } ?: return
+        val messageIndex = conversation.messages.indexOfFirst { it.id == messageId }
+        if (messageIndex < 0) return
+        val target = conversation.messages[messageIndex]
+        if (target.role != MessageRole.USER) return
+
+        val updatedText = text.trim()
+        val priorMessages = conversation.messages.take(messageIndex)
+
+        updateConversation(conversationId) { current ->
+            val edited = current.messages[messageIndex].copy(content = updatedText)
+            val truncated = current.messages.take(messageIndex) + edited
+            current.copy(
+                messages = truncated,
+                previewText = if (edited.attachments.isEmpty()) {
+                    updatedText
+                } else {
+                    updatedText.ifBlank { attachmentPreview(edited.attachments) }
+                },
+                updatedAtMillis = System.currentTimeMillis(),
+                memorySummary = MemoryPlanner.summary(truncated, current.memorySummary)
+            )
+        }
+
+        launchReply(conversationId, priorMessages, updatedText)
+    }
+
+    /**
+     * Port of regenerateLastResponse in iphone/AetherChat/Models.swift — drops the trailing
+     * assistant turn(s) and re-answers the last user message.
+     */
+    fun regenerateLastResponse(conversationId: UUID) {
+        val conversation = _conversations.value.firstOrNull { it.id == conversationId } ?: return
+        val lastAssistantIndex = conversation.messages.indexOfLast { it.role == MessageRole.ASSISTANT }
+        if (lastAssistantIndex < 0) return
+        val promptMessages = conversation.messages.take(lastAssistantIndex)
+        val lastUserIndex = promptMessages.indexOfLast { it.role == MessageRole.USER }
+        if (lastUserIndex < 0) return
+        val latestUser = promptMessages[lastUserIndex]
+
+        updateConversation(conversationId) { current ->
+            current.copy(
+                messages = promptMessages,
+                previewText = latestUser.content.ifBlank { attachmentPreview(latestUser.attachments) },
+                updatedAtMillis = System.currentTimeMillis(),
+                memorySummary = MemoryPlanner.summary(promptMessages, current.memorySummary)
+            )
+        }
+
+        launchReply(conversationId, promptMessages.take(lastUserIndex), latestUser.content)
+    }
+
+    /** Port of ChatView.stopSending on iOS — cancels the in-flight generation. */
+    fun stopSending() {
+        // Only a deliberate stop should leave a "Response stopped." message behind;
+        // a cancellation caused by starting the next turn must not.
+        stoppedByUser = true
+        replyJob?.cancel()
+    }
+
+    private fun launchReply(conversationId: UUID, priorMessages: List<ChatMessage>, latestUserText: String) {
+        replyJob?.cancel()
+        stoppedByUser = false
+        lateinit var job: Job
+        job = viewModelScope.launch {
             _isSending.value = true
             try {
-            generateAndAppendReply(conversationId, priorMessages, text)
+                generateAndAppendReply(conversationId, priorMessages, latestUserText)
             } finally {
-                _isSending.value = false
-                _generationStatus.value = null
+                // A superseded job must not clear state belonging to the job that replaced
+                // it — cancel() does not join, so these finally blocks can interleave.
+                if (replyJob === job) {
+                    _isSending.value = false
+                    _generationStatus.value = null
+                    _modelLoadingMessage.value = null
+                }
             }
         }
+        replyJob = job
     }
 
     private suspend fun generateAndAppendReply(
@@ -226,22 +390,26 @@ class AppState(application: Application) : AndroidViewModel(application) {
         val persona = conversation.persona
 
         try {
-            _generationStatus.value = "Reading the conversation"
+            _generationStatus.value = if (snapshot.any { it.attachments.isNotEmpty() }) {
+                "Reading attachments and the conversation"
+            } else {
+                "Reading the conversation"
+            }
 
             var webSearchContext: String? = null
             var webSourcesMarkdown: String? = null
             WebSearchIntent.query(latestUserText, priorMessages)?.let { rawWebQuery ->
-                if (!networkMonitor.isConnected.value) {
-                    webSearchContext = WebSearchService.offlineContext(rawWebQuery)
+                if (networkMonitor.hasReceivedStatus && !networkMonitor.isConnected.value) {
+                    webSearchContext = offlineWebContext(rawWebQuery, conversationId)
                 } else {
                     _generationStatus.value = "Searching the web"
-                    val webQuery = locationService.localizeSearchQuery(rawWebQuery, latestUserText)
                     try {
+                        val webQuery = locationService.localizeSearchQuery(rawWebQuery, latestUserText)
                         val result = webSearch.search(webQuery)
                         webSearchContext = result.context.ifEmpty { null }
                         webSourcesMarkdown = result.sourcesMarkdown
                     } catch (_: Exception) {
-                        webSearchContext = WebSearchService.offlineContext(rawWebQuery)
+                        webSearchContext = offlineWebContext(rawWebQuery, conversationId)
                     }
                 }
             }
@@ -251,37 +419,67 @@ class AppState(application: Application) : AndroidViewModel(application) {
             val memoryContext = MemoryPlanner.memoryContext(conversation.memorySummary, hits)
 
             _generationStatus.value = "Composing a response"
-            var response = generateReply(persona, snapshot, webSearchContext, memoryContext, customSystemPrompt.value)
-
-            /*
-             Anti-doom-loop recovery is intentionally disabled while the model-level
-             tuning is being evaluated. Keep this block intact for TestFlight/beta
-             reactivation if the model still produces a loop.
+            var response = generateReply(persona, snapshot, webSearchContext, memoryContext, runtimeSystemPrompt)
 
             if (LoopDetector.isLooping(response, snapshot)) {
                 _generationStatus.value = "Redirecting repeated response"
                 response = generateReply(
                     persona, snapshot, webSearchContext, memoryContext,
-                    LoopDetector.redirectedSystemPrompt(customSystemPrompt.value, response, latestUserText)
+                    LoopDetector.redirectedSystemPrompt(runtimeSystemPrompt, response, latestUserText)
                 )
+                if (LoopDetector.isLooping(response, snapshot)) {
+                    _generationStatus.value = "Trying a shorter recovery"
+                    response = generateReply(
+                        persona, snapshot, webSearchContext, memoryContext,
+                        LoopDetector.compactRecoverySystemPrompt(runtimeSystemPrompt, latestUserText)
+                    )
+                }
                 if (LoopDetector.isLooping(response, snapshot)) {
                     response = LoopDetector.fallbackRedirectResponse(latestUserText)
                 }
             }
-            */
 
-            webSourcesMarkdown?.let { sources ->
-                val lc = response.lowercase()
-                if (!(lc.contains("sources") && lc.contains("](http"))) {
-                    response = "${response.trim()}\n\n$sources"
-                }
+            response = responseWithSources(response, webSourcesMarkdown)
+            _modelLoadingMessage.value = null
+            _generationStatus.value = null
+            appendAssistantMessage(conversationId, response)
+            notifyIfNeeded(conversationId, response)
+        } catch (cancellation: CancellationException) {
+            _modelLoadingMessage.value = null
+            _generationStatus.value = null
+            if (stoppedByUser) {
+                appendAssistantMessage(conversationId, "Response stopped.")
             }
-
-            appendAssistantMessage(conversationId, response.trim())
-        } catch (e: Exception) {
-            appendAssistantMessage(conversationId, "Inference error: ${e.message ?: e.toString()}")
+            throw cancellation
+        } catch (error: Exception) {
+            _modelLoadingMessage.value = null
+            _generationStatus.value = null
+            val message = localBackgroundInterruptionMessage(error)
+                ?: "Inference error: ${inferenceErrorDescription(error)}"
+            appendAssistantMessage(conversationId, message)
+            notifyIfNeeded(conversationId, message)
         }
     }
+
+    /** Port of offlineWebContext on iOS — the unavailable notice is shown once per conversation. */
+    private fun offlineWebContext(query: String, conversationId: UUID): String {
+        val includeNotice = offlineWebNoticeShownConversationIds.add(conversationId)
+        return WebSearchService.offlineContext(query, includeNotice)
+    }
+
+    /** Port of responseWithSources on iOS — appends citations unless the model already cited. */
+    private fun responseWithSources(response: String, sourcesMarkdown: String?): String {
+        val trimmed = response.trim()
+        val sources = sourcesMarkdown?.trim().orEmpty()
+        if (sources.isEmpty()) return trimmed
+        val lowercased = trimmed.lowercase()
+        if (lowercased.contains("sources") && lowercased.contains("](http")) return trimmed
+        return "$trimmed\n\n$sources"
+    }
+
+    /** Port of runtimeSystemPrompt on iOS. */
+    private val runtimeSystemPrompt: String
+        get() = customSystemPrompt.value.trim()
 
     private suspend fun generateReply(
         persona: AssistantPersona,
@@ -290,22 +488,73 @@ class AppState(application: Application) : AndroidViewModel(application) {
         memoryContext: String?,
         customSystemPrompt: String
     ): String {
-        val engine = if (inferenceProvider.value == InferenceProvider.ON_DEVICE && onDevice.isAvailable) {
-            onDevice
-        } else {
-            backend
+        // Mirrors generateReply on iOS: the bundled model always goes on-device, and an
+        // unavailable local runtime is a hard error rather than a silent fall-through to a
+        // backend endpoint the user has no UI to configure.
+        val wantsOnDevice = selectedModel.value == ModelCatalog.CANOPY_V1_DISPLAY_NAME ||
+            inferenceProvider.value == InferenceProvider.ON_DEVICE
+        if (wantsOnDevice && !onDevice.isAvailable) {
+            throw IllegalStateException(
+                "${selectedModel.value} is not available for on-device inference on this device. " +
+                    "The bundled llama.cpp runtime could not be loaded."
+            )
         }
+        val engine = if (wantsOnDevice) onDevice else backend
         return engine.send(persona, messages, webSearchContext, memoryContext, customSystemPrompt) { status ->
-            _generationStatus.value = status ?: "Composing a response"
+            if (status != null) {
+                _modelLoadingMessage.value = status
+            } else {
+                _modelLoadingMessage.value = null
+                _generationStatus.value = "Composing a response"
+            }
+        }
+    }
+
+    /** Port of inferenceErrorDescription on iOS. */
+    private fun inferenceErrorDescription(error: Throwable): String =
+        error.message?.takeIf { it.isNotBlank() } ?: error.toString()
+
+    /**
+     * Port of localBackgroundInterruptionMessage on iOS — local inference killed while
+     * backgrounded produces a decode failure that is not the user's fault.
+     */
+    private fun localBackgroundInterruptionMessage(error: Throwable): String? {
+        if (_appIsActive.value) return null
+        val message = error.message.orEmpty()
+        val interrupted = message.contains("decode", ignoreCase = true) ||
+            message.contains("empty response", ignoreCase = true)
+        if (!interrupted) return null
+        return "CanopyChat was interrupted while running local inference in the background. " +
+            "The local model has been reset; please resend the message."
+    }
+
+    /** Port of notifyIfNeeded on iOS — only notifies when the app is backgrounded. */
+    private fun notifyIfNeeded(conversationId: UUID, response: String) {
+        if (_appIsActive.value) return
+        val title = _conversations.value.firstOrNull { it.id == conversationId }?.title ?: "Canopy"
+        val preview = response.replace("\n", " ").trim().take(160)
+        CanopyNotifications.notifyReplyReady(getApplication(), "$title replied", preview)
+    }
+
+    /** Port of attachmentPreview on iOS. */
+    private fun attachmentPreview(attachments: List<ChatAttachment>): String {
+        val imageCount = attachments.count { it.isImage }
+        val fileCount = attachments.size - imageCount
+        return when {
+            imageCount == 0 && fileCount == 0 -> ""
+            fileCount == 0 -> "$imageCount image attachment${if (imageCount == 1) "" else "s"}"
+            imageCount == 0 -> "$fileCount file attachment${if (fileCount == 1) "" else "s"}"
+            else -> "$imageCount image${if (imageCount == 1) "" else "s"}, " +
+                "$fileCount file${if (fileCount == 1) "" else "s"}"
         }
     }
 
     private fun appendAssistantMessage(conversationId: UUID, content: String) {
         updateConversation(conversationId) { current ->
-            val reply = ChatMessage(role = MessageRole.ASSISTANT, content = content)
+            val reply = ChatMessage(role = MessageRole.ASSISTANT, content = content.trim())
             current.copy(
                 messages = current.messages + reply,
-                previewText = content,
+                previewText = reply.content,
                 updatedAtMillis = System.currentTimeMillis(),
                 memorySummary = MemoryPlanner.summary(current.messages + reply, current.memorySummary)
             )
@@ -368,23 +617,43 @@ class AppState(application: Application) : AndroidViewModel(application) {
             )
         ),
         Conversation(
-            title = "Customer Follow-Up Email",
-            workspace = Workspace.WORK,
+            title = "Dinner From What's Left",
+            workspace = Workspace.PERSONAL,
             persona = AssistantPersona.DEFAULT,
-            previewText = "Here's a short, friendly follow-up draft you can adjust...",
+            previewText = "That's enough for a solid one-pan dinner...",
             messages = listOf(
-                ChatMessage(role = MessageRole.USER, content = "Draft a friendly follow-up email to a customer who went quiet after a demo."),
-                ChatMessage(role = MessageRole.ASSISTANT, content = "Here's a short, friendly follow-up draft you can adjust:\n\nSubject: Following up on the demo\n\nHi [Name],\n\nThanks again for taking the time to see the product last week. I know things get busy, so no pressure — I just wanted to check whether any questions came up on your side. Happy to share pricing details or set up a quick call with your team whenever it's useful.\n\nBest,\n[Your name]")
+                ChatMessage(role = MessageRole.USER, content = "I have chicken thighs, half an onion, rice, and a lemon. What can I make for dinner?"),
+                ChatMessage(role = MessageRole.ASSISTANT, content = "That's enough for a solid one-pan dinner — lemon chicken and rice. Brown the salted thighs skin-side down in an oven-safe pan, set them aside, then soften the onion and toast the rice in the same fat. Add 1½ cups water per cup of rice, squeeze in half the lemon, nestle the chicken back on top, and bake covered at 375°F for 25 minutes.\n\nSqueeze the other lemon half over everything right before serving — that's what makes it taste finished rather than plain.")
             )
         ),
         Conversation(
-            title = "Social Post Ideas",
+            title = "Are These Leftovers Still Good?",
+            workspace = Workspace.PERSONAL,
+            persona = AssistantPersona.CONCISE,
+            previewText = "Four days is the outer limit for cooked chicken...",
+            messages = listOf(
+                ChatMessage(role = MessageRole.USER, content = "How long is cooked chicken safe in the fridge? Mine's been in there since Sunday."),
+                ChatMessage(role = MessageRole.ASSISTANT, content = "Four days is the outer limit for cooked chicken in the fridge at 40°F or below.\n\nIf Sunday was more than four days ago, throw it out — smell isn't a reliable test, since the bacteria that cause illness don't change how food looks or smells. To buy more time next round, freeze it within a day or two; it keeps for months at 0°F.\n\nSources\n- [FoodSafety.gov — Cold Food Storage Chart](https://www.foodsafety.gov/food-safety-charts/cold-food-storage-charts)")
+            )
+        ),
+        Conversation(
+            title = "The Text I Keep Putting Off",
             workspace = Workspace.CREATIVE,
             persona = AssistantPersona.CREATIVE,
-            previewText = "Three angles for this week's posts: behind-the-scenes, a customer win, and a quick tip...",
+            previewText = "Here's a version that's warm but doesn't over-explain...",
             messages = listOf(
-                ChatMessage(role = MessageRole.USER, content = "Give me a few social post ideas for a small business this week."),
-                ChatMessage(role = MessageRole.ASSISTANT, content = "Three angles for this week's posts: behind-the-scenes, a customer win, and a quick tip. Behind-the-scenes builds trust, the customer win is social proof, and a genuinely useful tip earns saves and shares. Tell me your business and I'll draft all three.")
+                ChatMessage(role = MessageRole.USER, content = "I need to cancel dinner plans with a friend tonight and I feel bad about it. Help me word the text."),
+                ChatMessage(role = MessageRole.ASSISTANT, content = "Here's a version that's warm but doesn't over-explain:\n\n\"Hey — I'm so sorry, I have to bail on tonight. I'm running on empty and I'd be bad company. Can we do next week instead? I'll pick the place.\"\n\nIt apologizes once rather than three times, gives a reason without an essay, and offers the next date immediately so it reads as a reschedule instead of a fade. Want a shorter version?")
+            )
+        ),
+        Conversation(
+            title = "Making Sense of a Car Repair Quote",
+            workspace = Workspace.RESEARCH,
+            persona = AssistantPersona.ANALYTICAL,
+            previewText = "Three of those four lines are worth questioning...",
+            messages = listOf(
+                ChatMessage(role = MessageRole.USER, content = "The shop quoted me \$1,240: brake pads and rotors \$610, brake fluid flush \$150, engine air filter \$95, shop supplies \$85, labor \$300. Is any of that padding?"),
+                ChatMessage(role = MessageRole.ASSISTANT, content = "Three of those four lines are worth questioning:\n\n- **Pads and rotors at \$610** — reasonable if that covers all four wheels, high if it's only the front. Ask which axles are included before anything else.\n- **Engine air filter at \$95** — the part itself is usually \$20-30 and takes a few minutes to swap. This is the easiest line to decline and do yourself.\n- **Shop supplies at \$85** — a percentage-based catch-all fee. Many shops will reduce or drop it if you ask.\n- **Brake fluid flush at \$150** — legitimate maintenance, but only if it's actually due. Ask when it was last done.\n\nAsk for the itemized parts numbers and the labor hours. A shop that won't put those in writing is telling you something.")
             )
         )
     )
@@ -406,6 +675,21 @@ object LoopDetector {
             Answer this latest user message directly: "${latestUserText.trim()}"
             Avoid starting with the same wording as this rejected draft:
             ${rejectedResponse.take(600)}
+            """.trimIndent()
+        )
+        return parts.joinToString("\n\n")
+    }
+
+    /** Port of compactRecoverySystemPrompt in iphone/AetherChat/Models.swift. */
+    fun compactRecoverySystemPrompt(basePrompt: String, latestUserText: String): String {
+        val parts = mutableListOf<String>()
+        if (basePrompt.isNotBlank()) parts.add(basePrompt.trim())
+        parts.add(
+            """
+            Recovery mode: the previous draft repeated itself. Answer only the latest user message.
+            Use 2-5 concise sentences unless the user explicitly asked for code, a list, or creative writing.
+            Do not repeat earlier assistant wording. Do not ask for details already provided.
+            Latest user message: "${latestUserText.trim()}"
             """.trimIndent()
         )
         return parts.joinToString("\n\n")

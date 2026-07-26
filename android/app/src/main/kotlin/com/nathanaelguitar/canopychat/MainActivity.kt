@@ -1,8 +1,12 @@
 package com.nathanaelguitar.canopychat
 
+import android.Manifest
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -13,6 +17,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
+import com.nathanaelguitar.canopychat.core.CanopyNotifications
 import com.nathanaelguitar.canopychat.core.CanopySubscriptionManager
 import com.nathanaelguitar.canopychat.ui.ChatScreen
 import com.nathanaelguitar.canopychat.ui.ConversationListScreen
@@ -25,13 +30,39 @@ class MainActivity : ComponentActivity() {
 
     private val state: AppState by viewModels()
 
+    private val notificationPermission =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* optional */ }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Opt in explicitly so the window stops resizing itself for the keyboard; the
+        // Compose layouts consume the IME inset themselves via imePadding().
+        enableEdgeToEdge()
+        CanopyNotifications.ensureChannel(this)
+        requestNotificationPermissionIfNeeded()
         setContent {
             MaterialTheme {
                 CanopyNavHost(state)
             }
         }
+    }
+
+    // Mirrors AppState.appIsActive on iOS, which gates the background-reply notification.
+    override fun onStart() {
+        super.onStart()
+        state.setAppIsActive(true)
+    }
+
+    override fun onStop() {
+        super.onStop()
+        state.setAppIsActive(false)
+    }
+
+    /** iOS asks via UNUserNotificationCenter.requestAuthorization; Android needs a runtime grant on 13+. */
+    private fun requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        if (CanopyNotifications.hasPermission(this)) return
+        notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 }
 
@@ -68,10 +99,15 @@ private fun CanopyNavHost(state: AppState) {
         )
         Screen.Settings -> SettingsScreen(
             state = state,
+            subscription = subscription,
             onBack = { screen = Screen.Conversations },
             onSubscription = { screen = Screen.Paywall }
         )
-        Screen.Paywall -> PaywallScreen(subscription = subscription, onBack = { screen = Screen.Settings })
+        Screen.Paywall -> PaywallScreen(
+            subscription = subscription,
+            isDark = isDark,
+            onBack = { screen = Screen.Settings }
+        )
         is Screen.Chat -> ChatScreen(
             state = state,
             conversationId = current.conversationId,

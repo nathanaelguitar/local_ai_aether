@@ -153,12 +153,20 @@ enum class InferenceProvider(val rawValue: String) {
 
 object ModelCatalog {
     const val CANOPY_V1_DISPLAY_NAME = "Canopy V1"
+    const val LEGACY_DISPLAY_NAME = "Aether V1"
     const val GGUF_REPOSITORY = "mradermacher/Qwen3.5-2b-Kimi-and-Opus-Distillation-GGUF"
+    const val GGUF_QUANTIZATION = "Q4_K_M"
     const val GGUF_FILENAME = "Qwen3.5-2b-Kimi-and-Opus-Distillation.Q4_K_M.gguf"
     const val MMPROJ_FILENAME = "Qwen3.5-2b-Kimi-and-Opus-Distillation.mmproj-Q8_0.gguf"
-    const val CONTEXT_TOKENS = 20_000
+
+    // A 20k KV cache is expensive on a phone and is rarely needed because the
+    // prompt builder already degrades older turns and attachments.
+    const val CONTEXT_TOKENS = 12_288
     const val BATCH_TOKENS = 2_048
-    const val MAX_OUTPUT_TOKENS = 512
+    const val IMAGE_MAX_TOKENS = 768
+
+    // 512 tokens was an observable hard stop for longer answers.
+    const val MAX_OUTPUT_TOKENS = 768
 
     val ggufDownloadUrl = "https://huggingface.co/$GGUF_REPOSITORY/resolve/main/$GGUF_FILENAME"
     val mmprojDownloadUrl = "https://huggingface.co/$GGUF_REPOSITORY/resolve/main/$MMPROJ_FILENAME"

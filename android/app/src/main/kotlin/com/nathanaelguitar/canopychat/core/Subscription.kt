@@ -81,6 +81,14 @@ class CanopySubscriptionManager(context: Context) :
 
     fun restorePurchases() = refresh()
 
+    /**
+     * Port of canRedeemTestAccessCode on iOS, which gates the whole "Testing Options"
+     * disclosure on the paywall. iOS also treats the simulator and StoreKit sandbox as
+     * eligible; on Android the debug build is the equivalent.
+     */
+    val canRedeemTestAccessCode: Boolean
+        get() = BuildConfig.DEBUG
+
     fun redeemTestAccessCode(code: String): Boolean {
         if (!BuildConfig.DEBUG) {
             _errorMessage.value = "Test access is only available in debug builds."

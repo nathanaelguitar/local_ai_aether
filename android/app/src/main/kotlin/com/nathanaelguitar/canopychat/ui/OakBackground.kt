@@ -80,6 +80,34 @@ fun OakBackground(isDark: Boolean, content: @Composable () -> Unit) {
                 }
             }
 
+            // Knots with growth rings
+            val knotColor = if (isDark) Color(0xFFD4B896) else Color(0xFF6B4423)
+            val knotAlpha = if (isDark) 0.04f else 0.05f
+            val knots = listOf(
+                Triple(0.82f, 0.18f, 9f),
+                Triple(0.12f, 0.62f, 7f),
+                Triple(0.68f, 0.88f, 8f)
+            )
+            for ((kx, ky, r) in knots) {
+                val cx = w * kx
+                val cy = h * ky
+                drawOval(
+                    color = knotColor.copy(alpha = knotAlpha * 2.2f),
+                    topLeft = Offset(cx - r * 0.6f, cy - r * 0.45f),
+                    size = androidx.compose.ui.geometry.Size(r * 1.2f, r * 0.9f)
+                )
+                for (ring in 1..3) {
+                    val rx = r * (1f + ring * 1.1f)
+                    val ry = rx * 0.72f
+                    drawOval(
+                        color = knotColor.copy(alpha = knotAlpha * (1f - ring * 0.22f)),
+                        topLeft = Offset(cx - rx, cy - ry),
+                        size = androidx.compose.ui.geometry.Size(rx * 2f, ry * 2f),
+                        style = Stroke(width = 1f)
+                    )
+                }
+            }
+
             // Warm glow, top-left and near the floor
             drawOval(
                 color = glow.copy(alpha = glowAlpha),

@@ -15,7 +15,10 @@ namespace {
 
 constexpr const char * TAG = "CanopyLlama";
 constexpr int32_t BATCH_SIZE = 2048;
-constexpr int32_t CONTEXT_SIZE = 20000;
+// Mirrors ModelCatalog.CONTEXT_TOKENS / AetherModelCatalog.aetherV1ContextTokens.
+// A 20k KV cache is expensive on a phone and is rarely needed because the
+// prompt builder already degrades older turns and attachments.
+constexpr int32_t CONTEXT_SIZE = 12288;
 
 std::mutex g_mutex;
 llama_model * g_model = nullptr;

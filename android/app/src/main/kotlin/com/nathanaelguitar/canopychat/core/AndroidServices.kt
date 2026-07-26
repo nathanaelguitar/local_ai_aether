@@ -2,6 +2,8 @@ package com.nathanaelguitar.canopychat.core
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.Context
 import android.content.pm.PackageManager
 import android.location.Geocoder
@@ -12,6 +14,8 @@ import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.os.Build
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -72,22 +76,77 @@ object CanopyFeedback {
         SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", Locale.US).format(Date())
 }
 
+/**
+ * Android substitute for AetherNotifications in iphone/AetherChat/Models.swift.
+ * UNUserNotificationCenter has no Android equivalent; this uses NotificationManager
+ * with a dedicated channel. Posting is best-effort — replies still arrive in-app if
+ * the POST_NOTIFICATIONS runtime permission was denied.
+ */
+object CanopyNotifications {
+    private const val CHANNEL_ID = "canopy.replies"
+    private const val CHANNEL_NAME = "Assistant replies"
+
+    fun ensureChannel(context: Context) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val manager = context.getSystemService(NotificationManager::class.java) ?: return
+        if (manager.getNotificationChannel(CHANNEL_ID) != null) return
+        manager.createNotificationChannel(
+            NotificationChannel(CHANNEL_ID, CHANNEL_NAME, NotificationManager.IMPORTANCE_DEFAULT).apply {
+                description = "Tells you when CanopyChat finishes a reply while the app is in the background."
+            }
+        )
+    }
+
+    fun hasPermission(context: Context): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return true
+        return ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+    }
+
+    fun notifyReplyReady(context: Context, title: String, body: String) {
+        if (!hasPermission(context)) return
+        ensureChannel(context)
+        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_dialog_email)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setAutoCancel(true)
+            .build()
+        runCatching {
+            NotificationManagerCompat.from(context).notify(System.nanoTime().toInt(), notification)
+        }
+    }
+}
+
 class CanopyNetworkMonitor(context: Context) {
     private val connectivityManager =
         context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
     private val _isConnected = MutableStateFlow(currentlyConnected())
     val isConnected: StateFlow<Boolean> = _isConnected
 
+    /**
+     * Mirrors AetherNetworkMonitor.hasReceivedStatus on iOS. Callers must not treat the
+     * initial optimistic value as evidence the device is genuinely offline.
+     */
+    @Volatile
+    var hasReceivedStatus: Boolean = false
+        private set
+
     private val callback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
+            hasReceivedStatus = true
             _isConnected.value = true
         }
 
         override fun onLost(network: Network) {
+            hasReceivedStatus = true
             _isConnected.value = currentlyConnected()
         }
 
         override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
+            hasReceivedStatus = true
             _isConnected.value = hasInternet(networkCapabilities)
         }
     }
