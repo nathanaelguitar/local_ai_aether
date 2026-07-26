@@ -203,7 +203,11 @@ enum AetherModelStore {
 
     static func localAetherV1Files(status: AetherOnDeviceClient.StatusHandler? = nil) async throws -> AetherV1Files {
         let delivery = AetherPrivateModelDelivery.shared
-        if AetherBuildChannel.isContributor {
+        // Both production and contributor builds use the authenticated delivery
+        // service when configured. Only contributor builds collect telemetry;
+        // model delivery itself is intentionally shared so production can use a
+        // private R2-backed model without exposing a Hugging Face credential.
+        if await delivery.isConfigured {
             let cachedModel = await delivery.cachedModel()
             if let cachedModel,
                !(await delivery.shouldRefresh(cachedModel)),

@@ -142,8 +142,7 @@ private struct AetherModelDeliveryConfiguration {
     let registrationEndpoint: URL
 
     static var current: Self? {
-        guard AetherBuildChannel.isContributor,
-              let manifestRaw = Bundle.main.object(forInfoDictionaryKey: "AETHER_MODEL_MANIFEST_ENDPOINT") as? String,
+        guard let manifestRaw = Bundle.main.object(forInfoDictionaryKey: "AETHER_MODEL_MANIFEST_ENDPOINT") as? String,
               let registrationRaw = Bundle.main.object(forInfoDictionaryKey: "AETHER_MODEL_REGISTRATION_ENDPOINT") as? String,
               let manifestEndpoint = URL(string: manifestRaw.trimmingCharacters(in: .whitespacesAndNewlines)),
               let registrationEndpoint = URL(string: registrationRaw.trimmingCharacters(in: .whitespacesAndNewlines)),
@@ -212,8 +211,8 @@ private enum AetherModelDeliveryKeychain {
 }
 
 /// The active version is used in contributor telemetry after a private model has
-/// been activated. Production never writes this value because it never requests a
-/// private-model manifest.
+/// been activated. Production keeps the built-in catalog version because it does
+/// not collect telemetry, even though it now uses the same private delivery path.
 enum AetherActiveModelVersion {
     private static let key = "aether.activePrivateModelVersion"
 
