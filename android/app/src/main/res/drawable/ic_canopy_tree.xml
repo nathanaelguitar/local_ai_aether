@@ -1,0 +1,20 @@
+<!-- CanopyChat oak mark, shared visually with the iOS app icon. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="1024"
+    android:viewportHeight="1024">
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M370,292 a142,142 0 1,0 284,0 a142,142 0 1,0 -284,0 Z
+                          M222,378 a136,136 0 1,0 272,0 a136,136 0 1,0 -272,0 Z
+                          M530,378 a136,136 0 1,0 272,0 a136,136 0 1,0 -272,0 Z
+                          M138,494 a120,120 0 1,0 240,0 a120,120 0 1,0 -240,0 Z
+                          M646,494 a120,120 0 1,0 240,0 a120,120 0 1,0 -240,0 Z
+                          M326,432 a186,186 0 1,0 372,0 a186,186 0 1,0 -372,0 Z
+                          M252,500 a146,146 0 1,0 292,0 a146,146 0 1,0 -292,0 Z
+                          M480,500 a146,146 0 1,0 292,0 a146,146 0 1,0 -292,0 Z
+                          M462,555 L462,700 C462,762 424,802 336,842
+                          C318,850 316,872 338,872 L686,872 C708,872 706,850 688,842
+                          C600,802 562,762 562,700 L562,555 Z" />
+</vector>

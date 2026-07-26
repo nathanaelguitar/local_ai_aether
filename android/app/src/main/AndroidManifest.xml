@@ -10,6 +10,7 @@
          Before a Play Store release, replace with a networkSecurityConfig that scopes
          cleartext to private-network hosts only. -->
     <application
+        android:name=".CanopyApplication"
         android:label="CanopyChat"
         android:usesCleartextTraffic="true"
         android:icon="@mipmap/ic_launcher"
@@ -19,7 +20,8 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:configChanges="orientation|screenSize|keyboardHidden">
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

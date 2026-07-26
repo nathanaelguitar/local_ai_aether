@@ -48,11 +48,57 @@ private data class SearchDocument(val title: String, val url: String, val snippe
             return title.isNotEmpty() && url.isNotEmpty() && snippet.isNotEmpty()
         }
 
+    /**
+     * Port of AetherSearchDocument.score(for:) on iOS — query-aware boosts layered on
+     * top of the domain base score.
+     */
+    fun score(query: String): Int {
+        val lowercasedQuery = query.lowercase()
+        val combined = "$title $snippet $source".lowercase()
+        var value = score
+
+        val asksRemainingTeams = listOf(
+            "teams left", "who is left", "who's left", "left in", "remain", "remaining",
+            "qualified", "eliminated", "knocked out"
+        ).any { it in lowercasedQuery }
+
+        if (asksRemainingTeams) {
+            if (listOf("eliminated", "knocked out", "lost to", "exit door").any { it in combined }) {
+                value += 28
+            }
+            if (listOf("remaining", "teams left", "still in", "bracket", "quarterfinal").any { it in combined }) {
+                value += 24
+            }
+            if (listOf(
+                    "fifa ranking", "ranked #", "power ranking", "top contenders", "favorites"
+                ).any { it in combined }
+            ) {
+                value -= 50
+            }
+            if ("round of 32" in combined || "group stage" in combined) value -= 18
+        }
+
+        return value
+    }
+
     val score: Int
         get() {
             val host = source.lowercase()
             val combined = "$title $snippet".lowercase()
             var value = 0
+
+            if (host.endsWith("fifa.com")) value += 115
+            if (host.endsWith("espn.com")) value += 105
+            if (host.endsWith("cbssports.com")) value += 95
+            if (host.endsWith("nbcsports.com")) value += 92
+            if (host.endsWith("sportingnews.com")) value += 88
+            if (host.endsWith("si.com")) value += 84
+            if (host.endsWith("usatoday.com")) value += 76
+            if (host.endsWith("foxsports.com")) value += 72
+            if (host.endsWith("olympics.com")) value += 65
+            if (host.endsWith("worldcupwiki.com")) value += 36
+            if (host.endsWith("worldcuppass.com")) value += 28
+
             if (host.endsWith("sec.gov")) value += 120
             if (host.endsWith("reuters.com")) value += 110
             if (host.endsWith("nasdaq.com")) value += 100
@@ -76,20 +122,27 @@ private data class SearchDocument(val title: String, val url: String, val snippe
 
 class WebSearchService {
 
+    private val USER_AGENT =
+        "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Mobile Safari/537.36"
+
     suspend fun search(query: String, maxCharacters: Int = 8_000): WebSearchResult = withContext(Dispatchers.IO) {
         val cleaned = query.trim()
         if (cleaned.isEmpty()) return@withContext WebSearchResult(cleaned, "", emptyList())
 
         val searchQuery = enhancedQuery(cleaned)
+
+        // iOS tries DuckDuckGo Lite directly first and only falls back to the r.jina.ai
+        // proxy when that fails, so the proxy is not a hard dependency.
+        runCatching { directDuckDuckGoSearch(cleaned, searchQuery) }.getOrNull()?.let {
+            return@withContext it
+        }
+
         val encoded = URLEncoder.encode(searchQuery, "UTF-8")
         val url = URL("https://r.jina.ai/http://lite.duckduckgo.com/lite/?q=$encoded")
 
         val raw = try {
             (url.openConnection() as HttpURLConnection).run {
-                setRequestProperty(
-                    "User-Agent",
-                    "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Mobile Safari/537.36"
-                )
+                setRequestProperty("User-Agent", USER_AGENT)
                 connectTimeout = 25_000
                 readTimeout = 25_000
                 if (responseCode !in 200..299) return@withContext WebSearchResult(cleaned, "", emptyList())
@@ -99,16 +152,97 @@ class WebSearchService {
             return@withContext WebSearchResult(cleaned, "", emptyList())
         }
 
-        val documents = rankedDocuments(raw)
+        // The proxy returns this in the body (not as an HTTP error) when it wants a key.
+        if (raw.contains("AuthenticationRequiredError", ignoreCase = true) || raw.isBlank()) {
+            return@withContext WebSearchResult(cleaned, "", emptyList())
+        }
+
+        val documents = rankDocuments(rankedDocuments(raw), cleaned)
         val context = formatContext(cleaned, searchQuery, documents, extractContext(raw, maxCharacters))
         val citations = documents.take(4).map { WebCitation(it.title, it.url, it.source) }
         WebSearchResult(cleaned, context, citations)
     }
 
+    /** Port of directDuckDuckGoSearch in iphone/AetherChat/AetherWebSearchService.swift. */
+    private fun directDuckDuckGoSearch(cleaned: String, searchQuery: String): WebSearchResult {
+        val encoded = URLEncoder.encode(searchQuery, "UTF-8")
+        val connection = URL("https://lite.duckduckgo.com/lite/?q=$encoded")
+            .openConnection() as HttpURLConnection
+        connection.setRequestProperty("User-Agent", USER_AGENT)
+        connection.connectTimeout = 18_000
+        connection.readTimeout = 18_000
+        if (connection.responseCode !in 200..299) throw IllegalStateException("Search unavailable")
+
+        val html = connection.inputStream.bufferedReader().use { it.readText() }
+        val documents = rankDocuments(duckDuckGoLiteDocuments(html), cleaned)
+        if (documents.isEmpty()) throw IllegalStateException("No search results")
+
+        return WebSearchResult(
+            query = cleaned,
+            context = formatContext(cleaned, searchQuery, documents, ""),
+            citations = documents.take(4).map { WebCitation(it.title, it.url, it.source) }
+        )
+    }
+
+    /** Port of duckDuckGoLiteDocuments(fromHTML:) on iOS. */
+    private fun duckDuckGoLiteDocuments(html: String): List<SearchDocument> {
+        val pattern = Regex(
+            """<a\s+rel="nofollow"\s+href="([^"]+)"\s+class='result-link'>(.*?)</a>.*?<td\s+class='result-snippet'\s*>(.*?)</td>""",
+            setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE)
+        )
+        return pattern.findAll(html).mapNotNull { match ->
+            val document = SearchDocument(
+                title = cleanHtml(match.groupValues[2]),
+                url = decodedResultUrl(cleanHtml(match.groupValues[1])),
+                snippet = cleanHtml(match.groupValues[3])
+            )
+            document.takeIf { it.isUsable }
+        }.toList()
+    }
+
+    /** Port of rankDocuments(_:for:) on iOS — ties break on title so ordering is stable. */
+    private fun rankDocuments(documents: List<SearchDocument>, query: String): List<SearchDocument> =
+        documents.sortedWith(
+            compareByDescending<SearchDocument> { it.score(query) }.thenBy { it.title }
+        )
+
+    private fun cleanHtml(text: String): String = text
+        .replace(Regex("<[^>]+>"), " ")
+        .replace("&amp;", "&")
+        .replace("&quot;", "\"")
+        .replace("&#x27;", "'")
+        .replace("&#39;", "'")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&nbsp;", " ")
+        .replace(Regex("\\s+"), " ")
+        .trim()
+
     private fun enhancedQuery(query: String): String {
         val lc = query.lowercase()
         val isMarket = listOf("ipo", "stock", "ticker", "public", "nasdaq", "nyse", "shares").any { it in lc }
-        return if (isMarket) "$query SEC Nasdaq Reuters completed priced raised trading latest" else query
+        if (isMarket) return "$query SEC Nasdaq Reuters completed priced raised trading latest"
+
+        if (isSportsTournamentQuery(lc)) {
+            return "$query FIFA ESPN CBS Sports Sporting News Sports Illustrated eliminated " +
+                "qualified bracket remaining teams ${currentDateString()}"
+        }
+
+        return query
+    }
+
+    /** Port of isSportsTournamentQuery on iOS. */
+    private fun isSportsTournamentQuery(lowercased: String): Boolean {
+        val hasTournament = listOf(
+            "world cup", "fifa", "tournament", "match", "game", "quarterfinal",
+            "semifinal", "final", "round of", "bracket"
+        ).any { it in lowercased }
+        val hasSportsIntent = listOf(
+            "teams left", "who is left", "who's left", "left in", "remain",
+            "remaining", "qualified", "qualify", "eliminated", "knocked out",
+            "lost", "won", "win", "score", "schedule", "playing", "against"
+        ).any { it in lowercased }
+        return hasTournament && hasSportsIntent
     }
 
     private fun extractContext(raw: String, maxCharacters: Int): String {
@@ -182,19 +316,34 @@ class WebSearchService {
         DateFormat.getDateInstance(DateFormat.LONG, Locale.US).format(Date())
 
     companion object {
-        fun offlineContext(query: String): String =
-            """
-            Web search was requested for: $query
+        /**
+         * Port of AetherWebSearchIntent.offlineContext on iOS. The unavailable notice is
+         * only included the first time per conversation so follow-up turns don't repeat
+         * a stock disclaimer.
+         */
+        fun offlineContext(query: String, includeUnavailableNotice: Boolean = true): String {
+            val cleaned = query.trim()
+            val noticeRule = if (includeUnavailableNotice) {
+                "- You may briefly explain that live web access is unavailable if that helps set " +
+                    "expectations, but do not repeat a stock disclaimer on every follow-up."
+            } else {
+                "- Live web access is unavailable for this turn, but do not repeat that fact unless " +
+                    "the user asks about freshness or the answer genuinely depends on current information."
+            }
+            return """
+            Web search was requested for: $cleaned
             Current date: ${DateFormat.getDateInstance(DateFormat.LONG, Locale.US).format(Date())}.
 
             Network status: offline. CanopyChat does not currently have access to the web, likely because the device is in Airplane Mode or has no internet connection.
 
             Offline response rules:
-            - Start by saying that web access is unavailable right now.
-            - Do not claim that web search was performed or cite sources.
-            - If you can answer from general knowledge, clearly label it as potentially outdated.
-            - For current events, prices, weather, sports scores, restaurants, local recommendations, IPO status, or news, do not invent current facts.
+            $noticeRule
+            - Do not claim that web search was performed.
+            - Do not cite sources or mention search results.
+            - If this is about current events, weather, prices, stocks, sports results, schedules, restaurants, local places, or anything that needs live information, say you do not have enough current information to answer reliably.
+            - If you can still provide useful non-current background from general knowledge, make it clear that it may be outdated.
             """.trimIndent()
+        }
     }
 
     private fun formatContext(
@@ -275,6 +424,19 @@ object WebSearchIntent {
 
         val lc = current.lowercase()
         val explicitSearch = explicitSearchPhrases.any { it in lc }
+        val hasTrigger = triggerPhrases.any { it in lc }
+
+        // strippedSearchText() only removes search directives ("look up …") — it returns
+        // non-null for ANY two-word message, so using it as the entry condition made
+        // every ordinary sentence ("how are you") issue a web search. Require real
+        // search intent first.
+        if (!explicitSearch && !hasTrigger) {
+            // One exception: a bare follow-up like "what about in Paris" carries no
+            // trigger of its own but continues an active search domain.
+            val followUp = strippedSearchText(current) ?: return null
+            return inheritedSearchDomainQuery(followUp, previousMessages)
+        }
+
         val stripped = strippedSearchText(current)
         if (!stripped.isNullOrEmpty()) {
             if (explicitSearch && isWeakFollowUp(stripped)) {
@@ -284,10 +446,7 @@ object WebSearchIntent {
             return contextualizedQuery(stripped, previousMessages)
         }
 
-        if (triggerPhrases.any { it in lc }) {
-            return contextualPreviousQuery(previousMessages)
-        }
-        return null
+        return contextualPreviousQuery(previousMessages)
     }
 
     private fun isSearchDirective(text: String): Boolean {

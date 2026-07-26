@@ -7,6 +7,7 @@ import com.nathanaelguitar.canopychat.core.MessageRole
 import com.nathanaelguitar.canopychat.core.ModelCatalog
 import com.nathanaelguitar.canopychat.core.PromptBuilder
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -17,6 +18,7 @@ import java.text.DateFormat
 import java.util.Date
 import java.util.Locale
 import android.util.Log
+import kotlin.coroutines.coroutineContext
 
 /**
  * Abstraction over how a reply is produced. Mirrors the iOS split between
@@ -226,13 +228,21 @@ class LlamaCppEngine(private val modelStore: ModelStore) : InferenceEngine {
                 val isLast = index == PromptBuilder.degradationLevels.lastIndex
                 if (PromptBuilder.estimatedTokenCount(prompt, imageCount) > tokenBudget && !isLast) continue
                 onStatus("Loading CanopyChat into memory")
-                return LlamaCppRuntime.generate(
-                    modelFiles.model.absolutePath,
-                    modelFiles.mmproj.absolutePath,
-                    prompt,
-                    ModelCatalog.MAX_OUTPUT_TOKENS,
-                    PromptBuilder.includedImages(messages, level.window).map { it.data }.toTypedArray()
-                ).trim().also { onStatus(null) }.ifEmpty {
+                val images = PromptBuilder.includedImages(messages, level.window).map { it.data }.toTypedArray()
+                // generate() is a blocking JNI call that runs for tens of seconds. Called
+                // straight from viewModelScope it would sit on Dispatchers.Main, freezing
+                // every frame — the loading overlay could not even update its own label.
+                val reply = withContext(Dispatchers.Default) {
+                    LlamaCppRuntime.generate(
+                        modelFiles.model.absolutePath,
+                        modelFiles.mmproj.absolutePath,
+                        prompt,
+                        ModelCatalog.MAX_OUTPUT_TOKENS,
+                        images
+                    )
+                }.trim()
+                onStatus(null)
+                return reply.ifEmpty {
                     throw IllegalStateException("Canopy V1 generated an empty response.")
                 }
             }
@@ -287,15 +297,46 @@ class ModelStore(private val cacheDir: File) {
         if (destination.exists()) return@withContext destination
 
         val temp = File(directory, "$filename.download")
+        // These files are ~1.7 GB over mobile networks. Resuming from a partial file
+        // rather than restarting is the difference between "annoying" and "unusable".
+        val alreadyHave = if (temp.exists()) temp.length() else 0L
+
         val connection = URL(remoteUrl).openConnection() as HttpURLConnection
         connection.connectTimeout = 30_000
         connection.readTimeout = 120_000
-        if (connection.responseCode !in 200..299) {
-            throw IllegalStateException("Model download failed: HTTP ${connection.responseCode} for $filename")
+        if (alreadyHave > 0) {
+            connection.setRequestProperty("Range", "bytes=$alreadyHave-")
         }
-        connection.inputStream.use { input ->
-            temp.outputStream().use { output -> input.copyTo(output) }
+
+        try {
+            val code = connection.responseCode
+            if (code !in 200..299) {
+                throw IllegalStateException("Model download failed: HTTP $code for $filename")
+            }
+            // 206 means the server honored the range; 200 means it ignored it and is
+            // sending the whole file, so the partial data must be discarded.
+            val resuming = code == HttpURLConnection.HTTP_PARTIAL && alreadyHave > 0
+            connection.inputStream.use { input ->
+                java.io.FileOutputStream(temp, resuming).use { output ->
+                    // copyTo() blocks uninterruptibly, so a cancelled download would keep
+                    // pulling gigabytes. Checking between chunks makes cancellation real.
+                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                    while (true) {
+                        coroutineContext.ensureActive()
+                        val read = input.read(buffer)
+                        if (read < 0) break
+                        output.write(buffer, 0, read)
+                    }
+                }
+            }
+        } catch (error: Throwable) {
+            // Keep the partial file so the next attempt can resume; only a completed
+            // download is ever promoted to the real filename below.
+            throw error
+        } finally {
+            connection.disconnect()
         }
+
         if (!temp.renameTo(destination)) {
             temp.copyTo(destination, overwrite = true)
             temp.delete()
