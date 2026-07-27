@@ -8,6 +8,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -49,6 +50,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
@@ -387,12 +390,17 @@ private fun WoodlandWalkScene(isDark: Boolean) {
             -kotlin.math.abs(sin(celebrateT * Math.PI * 2)).toFloat() * 8
         }
         val legSwing = if (walking) sin(legPhase.toDouble()).toFloat() * 24 else 0f
-        Box(modifier = Modifier.offset(x = walkerX.dp, y = walkerY.dp)) {
+        Box(
+            modifier = Modifier
+                .offset(x = walkerX.dp, y = walkerY.dp)
+                .size(width = 40.dp, height = 44.dp),
+            contentAlignment = Alignment.Center
+        ) {
             // Legs.
             Box(
                 modifier = Modifier
-                    .offset(x = (-3).dp, y = 12.dp)
-                    .size(3.5.dp, 10.dp)
+                    .offset(x = (-4).dp, y = 15.dp)
+                    .size(4.dp, 11.dp)
                     .graphicsLayer(
                         rotationZ = legSwing,
                         transformOrigin = TransformOrigin(0.5f, 0f)
@@ -402,8 +410,8 @@ private fun WoodlandWalkScene(isDark: Boolean) {
             )
             Box(
                 modifier = Modifier
-                    .offset(x = 3.dp, y = 12.dp)
-                    .size(3.5.dp, 10.dp)
+                    .offset(x = 4.dp, y = 15.dp)
+                    .size(4.dp, 11.dp)
                     .graphicsLayer(
                         rotationZ = -legSwing,
                         transformOrigin = TransformOrigin(0.5f, 0f)
@@ -414,28 +422,27 @@ private fun WoodlandWalkScene(isDark: Boolean) {
             // Body.
             Box(
                 modifier = Modifier
-                    .size(22.dp)
+                    .size(26.dp)
                     .clip(CircleShape)
                     .background(Brush.linearGradient(listOf(OakColors.amber, OakColors.copper)))
             )
             // Eye.
             Box(
                 modifier = Modifier
-                    .offset(x = 5.dp, y = (-3).dp)
-                    .size(3.5.dp)
+                    .offset(x = 6.dp, y = (-4).dp)
+                    .size(4.dp)
                     .clip(CircleShape)
                     .background(Color.White)
             )
-            // Leaf hat.
-            Icon(
-                Icons.Filled.EnergySavingsLeaf,
-                contentDescription = null,
-                tint = OakColors.forestMedium,
+            // A plain woodland leaf, matching iOS's leaf.fill. Material's
+            // EnergySavingsLeaf includes a badge/bolt and made the walker look
+            // like a tiny status icon instead of a character.
+            WoodlandLeaf(
                 modifier = Modifier
-                    .offset(x = 3.dp, y = (-13).dp)
-                    .size(9.dp)
+                    .offset(x = 3.dp, y = (-17).dp)
+                    .size(width = 15.dp, height = 11.dp)
                     .graphicsLayer(
-                        rotationZ = -35f + if (walking) {
+                        rotationZ = -28f + if (walking) {
                             sin(bobPhase.toDouble()).toFloat() * 6
                         } else {
                             celebrateT * 20
@@ -443,6 +450,40 @@ private fun WoodlandWalkScene(isDark: Boolean) {
                     )
             )
         }
+    }
+}
+
+@Composable
+private fun WoodlandLeaf(modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier) {
+        val leaf = Path().apply {
+            moveTo(size.width * 0.08f, size.height * 0.72f)
+            cubicTo(
+                size.width * 0.22f,
+                size.height * 0.05f,
+                size.width * 0.72f,
+                -size.height * 0.05f,
+                size.width * 0.96f,
+                size.height * 0.30f
+            )
+            cubicTo(
+                size.width * 0.74f,
+                size.height * 0.88f,
+                size.width * 0.30f,
+                size.height * 1.02f,
+                size.width * 0.08f,
+                size.height * 0.72f
+            )
+            close()
+        }
+        drawPath(leaf, OakColors.forestMedium)
+        drawLine(
+            color = OakColors.forestDark.copy(alpha = 0.72f),
+            start = androidx.compose.ui.geometry.Offset(size.width * 0.05f, size.height * 0.88f),
+            end = androidx.compose.ui.geometry.Offset(size.width * 0.72f, size.height * 0.34f),
+            strokeWidth = size.height * 0.08f,
+            cap = StrokeCap.Round
+        )
     }
 }
 
