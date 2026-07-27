@@ -23,7 +23,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -373,12 +372,6 @@ fun ConversationListScreen(
                         .background(OakColors.oakMedium.copy(alpha = if (isDark) 0.22f else 0.12f), CircleShape)
                 ) {
                     Icon(Icons.Filled.Settings, contentDescription = "Settings", tint = OakColors.oakMedium, modifier = Modifier.size(20.dp))
-                }
-                Spacer(Modifier.width(10.dp))
-                IconButton(onClick = {
-                    showNewChat = true
-                }) {
-                    Icon(Icons.Filled.Add, contentDescription = "New conversation", tint = OakColors.oakMedium)
                 }
             }
 
@@ -1542,9 +1535,7 @@ fun ChatScreen(state: AppState, conversationId: UUID, onBack: () -> Unit, onNewC
                                 Icons.Filled.ArrowUpward,
                                 contentDescription = "Send",
                                 tint = if (canSend) Color.White else (if (isDark) OakColors.warmGray400 else OakColors.warmGray500),
-                                modifier = Modifier
-                                    .offset(y = (-1).dp)
-                                    .size(18.dp)
+                                modifier = Modifier.size(18.dp)
                             )
                         }
                     }
