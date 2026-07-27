@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Mirrors AetherModelFileProtection.excludeFromBackup on iOS: multi-GB model
+     artifacts are re-downloadable from the delivery service and must not be
+     uploaded into the user's cloud backup quota. -->
+<full-backup-content>
+    <exclude domain="file" path="Models/" />
+</full-backup-content>

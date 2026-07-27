@@ -9,3 +9,4 @@ android/.gradle/
 android/.kotlin/
 android/app/.cxx/
 android/app/build/
+android/local.properties

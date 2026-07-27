@@ -39,6 +39,49 @@ std::string jstring_to_string(JNIEnv * env, jstring value) {
     return result;
 }
 
+// llama_token_to_piece can split a multi-byte UTF-8 sequence across two pieces, and
+// NewStringUTF on a truncated sequence is undefined. Only the longest valid prefix is
+// emitted per callback; the incomplete tail rides along to the next piece.
+size_t valid_utf8_prefix(const std::string & s) {
+    size_t i = 0;
+    size_t last_valid = 0;
+    const size_t n = s.size();
+    while (i < n) {
+        const unsigned char c = static_cast<unsigned char>(s[i]);
+        size_t length;
+        if (c < 0x80) length = 1;
+        else if ((c & 0xE0) == 0xC0) length = 2;
+        else if ((c & 0xF0) == 0xE0) length = 3;
+        else if ((c & 0xF8) == 0xF0) length = 4;
+        else break;
+        if (i + length > n) break;
+        bool continuations_ok = true;
+        for (size_t j = 1; j < length; j++) {
+            if ((static_cast<unsigned char>(s[i + j]) & 0xC0) != 0x80) {
+                continuations_ok = false;
+                break;
+            }
+        }
+        if (!continuations_ok) break;
+        i += length;
+        last_valid = i;
+    }
+    return last_valid;
+}
+
+void emit_piece(JNIEnv * env, jobject callback, jmethodID on_token, const std::string & piece) {
+    if (callback == nullptr || piece.empty()) return;
+    jstring value = env->NewStringUTF(piece.c_str());
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+        return;
+    }
+    env->CallVoidMethod(callback, on_token, value);
+    env->DeleteLocalRef(value);
+    // A misbehaving UI callback must not take down generation.
+    if (env->ExceptionCheck()) env->ExceptionClear();
+}
+
 llama_model * load_model(const std::string & path) {
     if (g_model != nullptr && g_model_path == path) return g_model;
     if (g_model != nullptr) {
@@ -72,6 +115,9 @@ bool decode_prompt(llama_context * context, llama_batch & batch, const std::vect
 }
 
 std::string generate(
+        JNIEnv * env,
+        jobject callback,
+        jmethodID on_token,
         const std::string & model_path,
         const std::string & mmproj_path,
         const std::string & prompt,
@@ -168,13 +214,23 @@ std::string generate(
     llama_sampler_chain_add(sampler, llama_sampler_init_temp(0.8f));
     llama_sampler_chain_add(sampler, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
 
+    std::string result;
+    std::string pending_piece_bytes;
     for (int i = 0; i < max_tokens; i++, position++) {
         const llama_token token = llama_sampler_sample(sampler, context, -1);
         if (llama_vocab_is_eog(vocab, token)) break;
 
         char buffer[512];
         const int32_t length = llama_token_to_piece(vocab, token, buffer, sizeof(buffer), 0, true);
-        if (length > 0) result.append(buffer, length);
+        if (length > 0) {
+            result.append(buffer, length);
+            pending_piece_bytes.append(buffer, length);
+            const size_t valid = valid_utf8_prefix(pending_piece_bytes);
+            if (valid > 0) {
+                emit_piece(env, callback, on_token, pending_piece_bytes.substr(0, valid));
+                pending_piece_bytes.erase(0, valid);
+            }
+        }
 
         batch.n_tokens = 1;
         batch.token[0] = token;
@@ -205,7 +261,16 @@ Java_com_nathanaelguitar_canopychat_inference_LlamaCppRuntime_generate(
         jstring mmproj_path,
         jstring prompt,
         jint max_tokens,
-        jobjectArray image_arrays) {
+        jobjectArray image_arrays,
+        jobject callback) {
+    jmethodID on_token = nullptr;
+    if (callback != nullptr) {
+        jclass callback_class = env->GetObjectClass(callback);
+        if (callback_class != nullptr) {
+            on_token = env->GetMethodID(callback_class, "onToken", "(Ljava/lang/String;)V");
+            env->DeleteLocalRef(callback_class);
+        }
+    }
     std::vector<std::vector<unsigned char>> images;
     if (image_arrays != nullptr) {
         const jsize count = env->GetArrayLength(image_arrays);
@@ -221,6 +286,9 @@ Java_com_nathanaelguitar_canopychat_inference_LlamaCppRuntime_generate(
         }
     }
     const std::string result = generate(
+        env,
+        callback,
+        on_token,
         jstring_to_string(env, model_path),
         jstring_to_string(env, mmproj_path),
         jstring_to_string(env, prompt),
