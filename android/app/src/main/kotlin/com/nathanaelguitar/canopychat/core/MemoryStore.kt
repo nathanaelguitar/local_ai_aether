@@ -8,9 +8,14 @@ import org.json.JSONObject
 import java.util.UUID
 
 // Port of AetherMemoryStore from iphone/AetherChat/AetherMemoryStore.swift.
-// Uses FTS4 instead of FTS5 because FTS4 is guaranteed on all Android SQLite builds;
-// ranking falls back to recency instead of bm25.
-class MemoryStore(context: Context) : SQLiteOpenHelper(context, "canopy.sqlite", null, 1) {
+// Prefers FTS5 + bm25(message_fts) ranking like iOS, but Android's framework SQLite
+// does NOT guarantee the fts5 module (several OEM builds, e.g. some Samsung devices,
+// ship without it). When fts5 is unavailable the table is created as fts4 and search
+// falls back to recency ordering — same downgrade as round 1, graceful everywhere.
+class MemoryStore(context: Context) : SQLiteOpenHelper(context, "canopy.sqlite", null, 2) {
+
+    @Volatile
+    private var fts5Available: Boolean? = null
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
@@ -40,15 +45,79 @@ class MemoryStore(context: Context) : SQLiteOpenHelper(context, "canopy.sqlite",
             )
             """
         )
-        db.execSQL(
-            "CREATE VIRTUAL TABLE IF NOT EXISTS message_fts USING fts4(message_id, conversation_id, role, content)"
-        )
+        createFtsTable(db)
         db.execSQL(
             "CREATE INDEX IF NOT EXISTS idx_messages_conversation_sort ON messages(conversation_id, sort_index)"
         )
     }
 
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        if (oldVersion < 2) {
+            // Version 1 stored message_fts as FTS4; rebuild it as FTS5 so bm25
+            // ranking works where the module exists, re-indexing from messages.
+            db.execSQL("DROP TABLE IF EXISTS message_fts")
+            createFtsTable(db)
+            rebuildFtsIndex(db)
+        }
+    }
+
+    /** Mirrors the fts5 schema in AetherMemoryStore.setup, degrading to fts4 per device. */
+    private fun createFtsTable(db: SQLiteDatabase) {
+        try {
+            db.execSQL(
+                """
+                CREATE VIRTUAL TABLE IF NOT EXISTS message_fts USING fts5(
+                    message_id UNINDEXED,
+                    conversation_id UNINDEXED,
+                    role UNINDEXED,
+                    content
+                )
+                """
+            )
+            fts5Available = true
+        } catch (_: android.database.sqlite.SQLiteException) {
+            fts5Available = false
+            db.execSQL(
+                """
+                CREATE VIRTUAL TABLE IF NOT EXISTS message_fts USING fts4(
+                    message_id,
+                    conversation_id,
+                    role,
+                    content
+                )
+                """
+            )
+        }
+    }
+
+    /** Re-indexes every stored message, including extracted attachment text. */
+    private fun rebuildFtsIndex(db: SQLiteDatabase) {
+        db.rawQuery(
+            "SELECT id, conversation_id, role, content, attachments_json FROM messages",
+            null
+        ).use { cursor ->
+            while (cursor.moveToNext()) {
+                val content = buildString {
+                    append(cursor.getString(3))
+                    val attachmentText = attachmentsFromJsonArray(cursor.getString(4))
+                        .mapNotNull { it.extractedText }
+                    if (attachmentText.isNotEmpty()) {
+                        append('\n')
+                        append(attachmentText.joinToString("\n"))
+                    }
+                }
+                db.insert(
+                    "message_fts", null,
+                    ContentValues().apply {
+                        put("message_id", cursor.getString(0))
+                        put("conversation_id", cursor.getString(1))
+                        put("role", cursor.getString(2))
+                        put("content", content)
+                    }
+                )
+            }
+        }
+    }
 
     fun loadConversations(): List<Conversation> {
         val conversations = mutableListOf<Conversation>()
@@ -193,6 +262,23 @@ class MemoryStore(context: Context) : SQLiteOpenHelper(context, "canopy.sqlite",
         limit: Int = 6
     ): List<MemoryHit> {
         val ftsQuery = ftsQuery(query) ?: return emptyList()
+        // iOS orders by bm25(message_fts) ascending, newest first on ties. On devices
+        // whose SQLite lacks FTS5 (flag set by createFtsTable) skip straight to
+        // recency ordering; the try/catch covers the open-existing-DB case too.
+        val rankByRelevance = fts5Available != false
+        return queryHits(conversationId, ftsQuery, excluding, limit, rankByRelevance = rankByRelevance)
+            ?: queryHits(conversationId, ftsQuery, excluding, limit, rankByRelevance = false)
+            ?: emptyList()
+    }
+
+    private fun queryHits(
+        conversationId: UUID,
+        ftsQuery: String,
+        excluding: Set<UUID>,
+        limit: Int,
+        rankByRelevance: Boolean
+    ): List<MemoryHit>? {
+        val orderBy = if (rankByRelevance) "bm25(message_fts), m.timestamp DESC" else "m.timestamp DESC"
         val hits = mutableListOf<MemoryHit>()
         try {
             readableDatabase.rawQuery(
@@ -201,7 +287,7 @@ class MemoryStore(context: Context) : SQLiteOpenHelper(context, "canopy.sqlite",
                 FROM message_fts f
                 JOIN messages m ON m.id = f.message_id
                 WHERE f.conversation_id = ? AND message_fts MATCH ?
-                ORDER BY m.timestamp DESC
+                ORDER BY $orderBy
                 LIMIT ?
                 """,
                 arrayOf(conversationId.toString(), ftsQuery, (limit * 3).toString())
@@ -220,7 +306,7 @@ class MemoryStore(context: Context) : SQLiteOpenHelper(context, "canopy.sqlite",
                 }
             }
         } catch (_: Exception) {
-            return emptyList()
+            return null
         }
         return hits
     }

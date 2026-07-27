@@ -7,6 +7,18 @@ Baseline at start of port: iOS 6,953 Swift lines vs Android 3,447 Kotlin lines.
 
 ---
 
+> **Round 2 update (2026-07-26).** A full re-audit found this manifest had overclaimed:
+> iOS had shipped ~3,400 more Swift lines than the round-1 baseline (private model
+> delivery, Recently Deleted, contributor telemetry, feedback loop, streaming preview,
+> UI polish), and several round-1 rows were wrong — see **Round 2 corrections** and
+> **Round 2 ports** at the bottom of this file. Build-host note: the app now also
+> builds on aarch64 Linux hosts with `-Pcanopy.skipNative` (Google ships no NDK for
+> linux-arm64); that APK lacks `libcanopy_llama.so`, so on-device inference reports
+> itself unavailable and the app offers the Backend provider. Backend-side
+> requirements live in `docs/ANDROID_BACKEND_REQUIREMENTS.md`.
+
+---
+
 ## AetherModelCatalog.swift → core/Models.kt
 
 | Swift symbol | Kotlin target | Status |
@@ -240,6 +252,109 @@ Baseline at start of port: iOS 6,953 Swift lines vs Android 3,447 Kotlin lines.
 7. **`appIsActive` semantics.** iOS pairs this with `UIApplication.beginBackgroundTask` to buy
    execution time. Android coroutines in `viewModelScope` are not suspended on backgrounding, so
    the flag only gates the reply notification.
+
+---
+
+## Round 2 corrections (rows that were wrong above)
+
+| Round 1 claim | Reality / current state |
+|---|---|
+| `removeLegacySeedConversations` → done | **Data-loss bug**: Android deleted seed-titled chats at launch while iOS had disabled that routine. Now mirrors iOS: `migrateStockConversationsIfNeeded()` ports the non-destructive migration; the deletion routine is kept but never called (AppState.kt). |
+| `aetherV1MaxOutputTokens` = 768 | iOS is now **1024** (`AetherModelCatalog.swift:13`); Android `MAX_OUTPUT_TOKENS` updated to match. |
+| Model file `Qwen3.5-2b-Kimi-and-Opus-Distillation.Q4_K_M.gguf` | iOS now ships `canopy-1.1.2.Q4_K_M.gguf` from the private repo `nathanaelguitar/canopy-1.1.2`, version **1.1.2**; `ModelCatalog` resynced. |
+| `TypingIndicator` → done | Was 3 bouncing gray dots. Now the real port: breathing amber radial dot, shimmer text sweep, 5 rotating composing phrases (ChatComponents.kt). |
+| `ModelLoadingOverlay` → done | Was a generic spinner ring. Now ports `WoodlandWalkScene` (walking sprout, swaying tree, celebration leaf). |
+| `ChatEmptyState` / `EmptyGrove` → done | Were emoji + plain text. Now leaf-badge circle + serif titles + subtitle/filled capsule per iOS. |
+| PDF limitation (Known limitations #1) | Stale: `AttachmentLoader` ships PdfBox-Android extraction. |
+| "nested Testing Options" on paywall | Invented; iOS has a single "Have a test code?" toggle. Paywall rewritten (below). |
+| `MemoryStore` FTS4 + recency | Now FTS5 + `bm25()` ordering with recency fallback; DB v2 migration rebuilds the index from `messages` (MemoryStore.kt). |
+| Dark theme | Material components ignored the oak palette/dark mode. `CanopyTheme` (ui/Theme.kt) now supplies light+dark oak schemes to all Material3 components. |
+| `AetherModelDelivery.swift` not in manifest | Fully ported (see below) — it is the only supported production download path on iOS. |
+
+## Round 2 ports (new sections)
+
+### AetherModelDelivery.swift → core/ModelDelivery.kt + ModelStore rework
+
+| Swift symbol | Kotlin target | Status |
+|---|---|---|
+| `AetherModelDeliveryError` | `ModelDeliveryError` | done |
+| `CanopyModelManifest` (flat+nested tolerant decode, validation, malformed-host reject) | `CanopyModelManifest.parse/validated` | done |
+| Info.plist endpoint config (`AETHER_MODEL_*`) | `BuildConfig.MODEL_*_ENDPOINT` (gradle `CANOPY_*` overrides) | done |
+| `AetherModelDeliveryKeychain` (ThisDeviceOnly) | `DeliveryCredentialStore` (EncryptedSharedPreferences, Keystore-backed, plain-prefs fallback) | done |
+| `AetherBuildChannel` | `CanopyBuildChannel` (gradle `CANOPY_BUILD_CHANNEL`) | done |
+| `AetherActiveModelVersion` | `ActiveModelVersion` (contributor-gated; Settings shows "Canopy V1 · vX") | done |
+| `AetherCachedPrivateModel` + 12h refresh + URL-free record | `CachedPrivateModel` + `PrivateModelDelivery` (`active-private-model.json`) | done |
+| `AetherPrivateModelDelivery` (register, manifest, 401/403 re-auth retry, telemetry token) | `PrivateModelDelivery` | done |
+| `AetherRangeFileDownloader` (resume, 3 attempts, URL refresh, 4xx abort) | `ModelStore.downloadResumable` + retry loop | done |
+| SHA-256 + size verify, `receipt.json`, atomic promote, verified-cache reads | `ModelStore.verifyDownloadedFile` / `isVerifiedCachedFile` | done |
+| Offline fallback "Using downloaded Canopy X" | `ModelStore.localModelFiles` | done |
+| Versioned layout `Models/<id>/<version>/` + `safePathComponent` | same | done |
+| `excludeFromBackup` for model files | `res/xml/backup_rules.xml` + manifest `fullBackupContent` | done |
+| Legacy public-HF fallback when delivery unconfigured | preserved | done |
+| Unit tests (AetherModelDeliveryTests, 5) | `ModelDeliveryTest` (8 tests) | done |
+
+### Recently Deleted (Models.swift + SettingsView.swift + ConversationListView.swift)
+
+| Swift symbol | Kotlin target | Status |
+|---|---|---|
+| `DeletedConversation`, `recentlyDeleted`, `deletedRetentionDays = 30` | `DeletedConversation`, `recentlyDeleted`, `DELETED_RETENTION_DAYS` | done |
+| `restoreDeleted` / `permanentlyDeleteConversation` / `emptyRecentlyDeleted` / `purgeExpiredDeletedConversations` | same | done |
+| `RecentlyDeletedConversations.json` persistence | same (filesDir, org.json) | done |
+| Soft-delete in `delete(_:)` | `deleteConversation` | done |
+| `RecentlyDeletedView` + `RecentlyDeletedRow` + Empty-all confirmation | `RecentlyDeletedScreen` + `RecentlyDeletedRow` | done |
+| Settings "Chats > Recently Deleted" row | SettingsScreen "Chats" section | done |
+| Undo-delete toast (4.5 s) | ConversationListScreen `softDelete` + AnimatedVisibility toast | done |
+| Sample-conversation resync (5 iOS samples, staggered timestamps) | `sampleConversations()` | done |
+
+### Feedback loop + contributor telemetry (CanopyFeedback.swift + Contributor/)
+
+| Swift symbol | Kotlin target | Status |
+|---|---|---|
+| Thumbs rating with fill state | MessageBubble ThumbUp/ThumbDown (filled/outlined swap) | done |
+| Negative-rating delayed alert (180 ms) with 3 actions | AlertDialog + `CorrectionEditorSheet` | done |
+| `ContributorCorrectionSheet` | `CorrectionEditorSheet` | done |
+| User-message resend action | MessageBubble onResend → `editUserMessage` | done |
+| `AetherBetaTelemetry` (queue, 2% SHA-256 control sample, failure/harness selection, 24h batch deadline, retry w/ backoff, receipt-gated deletion, consent-withdrawal wipe, 48h prune, 2000 cap) | `core/BetaTelemetry.kt` | done |
+| `AetherContributorBatch` wire format (schema_version, batch_id, installation_id, sent_at, consent flag) | `TelemetryEvent.toWireJson` + batch builder | done |
+| `AetherFeedbackRating`, `AetherTelemetryEventType` | `TelemetryEventType` | done |
+| `CanopyContributorProgram` (disclosure ack, join, stopContributing, disclosure text) | `ContributorProgram` | done |
+| `ContributorConsentOverlay` + first-launch gating | MainActivity overlay + Welcome→Enter gate | done |
+| Settings "Beta Program" section | SettingsScreen (contributor only) | done |
+| Telemetry call sites (generated/rated/regenerated/resent/correction/webSearchPerformed/inferenceFailed, flush on active) | AppState record hooks + call sites | done |
+| `CanopyFeedback.modelFeedback/appIssue` exact templates (USER PROMPT, sections, support@canopychat.app) | AndroidServices.kt | done |
+| `AETHER_BETA_TELEMETRY_ENDPOINT` | `BuildConfig.BETA_TELEMETRY_ENDPOINT` (gradle override) | done |
+
+### UI/UX polish
+
+| iOS source | Android target | Status |
+|---|---|---|
+| Streaming preview (`streamingPreview` + `StreamingBubble`, amber ● cursor) | AppState.streamingPreview + JNI token callback (`canopy_llama.cpp`, UTF-8-safe pieces) + StreamingBubble | done (needs NDK rebuild of the .so) |
+| `AetherResponseNormalizer` (LaTeX→text, code-fence aware) | `core/ResponseNormalizer.kt`, applied post-generation | done |
+| WelcomeView staggered entrance, gradient badge, tinted tiles, gradient CTA, production copy | WelcomeScreen + `visibleAlpha` | done |
+| InputBar capsule (gradient stroke, gradient send w/ scale spring, keyboard chevron, gradient backdrop, attach popover + Web Search toggle) | ChatScreen input bar rewrite | done |
+| `webSearchEnabled` binding toggle | AppState.webSearchEnabled + generation gate | done |
+| Chat header: share-conversation + new-chat frosted capsule, tappable title → rename w/ Clear | ChatScreen header + RenameConversationDialog Clear | done |
+| Scroll: anchor trailing assistant reply to top; scroll-dismiss keyboard | ChatScreen LaunchedEffect ports | done |
+| ContentView paywall hard gate after Welcome | CanopyNavHost (hasPremium branches) | done |
+| PaywallView plan picker (cards, radio, BEST VALUE badge, gradient CTA), header branding, error card + Try Again | PaywallScreen rewrite | done |
+| Welcome→List + paywall transitions (0.4 s) | Crossfade in CanopyNavHost | done |
+| Settings "Accuracy & Safety" (production) | SettingsScreen | done |
+| Reply notification app icon | ic_canopy_tree small icon | done |
+| Article-evidence web grounding (`enrichDocuments`/`fetchArticleEvidence`/`relevantPassages`, sports rules) | core/WebSearch.kt | done |
+| Location triggers (full list incl. Spanish, fresh fix via requestSingleUpdate) | AndroidServices.kt | done |
+
+### Intentional round-2 divergences
+
+- `Device:`/`Android:` labels in feedback emails replace `Device:`/`iOS:` (platform equivalents).
+- Consent overlay is a dialog rather than a full-screen ZStack layer (same actions and copy).
+- iOS `webSearchSuggestion` is dead code upstream (`suggestedWebQuery = nil`) — not ported, matching iOS behavior.
+- Build/channel/endpoint configuration comes from gradle properties (`CANOPY_*`) instead of Info.plist keys, with identical production defaults.
+
+## Remaining backend-dependent items
+
+See `docs/ANDROID_BACKEND_REQUIREMENTS.md`: the delivery Worker endpoints Android now
+consumes, the contributor batches endpoint, and the NDK rebuild needed to ship
+`libcanopy_llama.so` (streaming callback included) from an x86_64 build host.
 
 ---
 

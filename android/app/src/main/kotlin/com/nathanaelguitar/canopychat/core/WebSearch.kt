@@ -1,6 +1,10 @@
 package com.nathanaelguitar.canopychat.core
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import java.net.HttpURLConnection
 import java.net.URL
@@ -9,6 +13,7 @@ import java.net.URLEncoder
 import java.text.DateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.coroutines.coroutineContext
 
 // Port of AetherWebSearchService and AetherWebSearchIntent from
 // iphone/AetherChat/AetherWebSearchService.swift.
@@ -33,7 +38,15 @@ data class WebSearchResult(
         }
 }
 
-private data class SearchDocument(val title: String, val url: String, val snippet: String) {
+private data class SearchDocument(
+    val title: String,
+    val url: String,
+    val snippet: String,
+    val evidence: String = ""
+) {
+    /** Port of AetherSearchDocument.withEvidence on iOS. */
+    fun withEvidence(newEvidence: String): SearchDocument = copy(evidence = newEvidence)
+
     val source: String
         get() = try {
             URL(url).host?.removePrefix("www.") ?: url
@@ -122,6 +135,12 @@ private data class SearchDocument(val title: String, val url: String, val snippe
 
 class WebSearchService {
 
+    /** Port of searchStopWords in iphone/AetherChat/AetherWebSearchService.swift. */
+    private val SEARCH_STOP_WORDS = setOf(
+        "the", "and", "for", "that", "with", "from", "what", "when", "where",
+        "who", "are", "was", "were", "this", "about", "near", "current", "latest"
+    )
+
     private val USER_AGENT =
         "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Mobile Safari/537.36"
 
@@ -157,14 +176,14 @@ class WebSearchService {
             return@withContext WebSearchResult(cleaned, "", emptyList())
         }
 
-        val documents = rankDocuments(rankedDocuments(raw), cleaned)
+        val documents = enrichDocuments(rankDocuments(rankedDocuments(raw), cleaned), cleaned)
         val context = formatContext(cleaned, searchQuery, documents, extractContext(raw, maxCharacters))
         val citations = documents.take(4).map { WebCitation(it.title, it.url, it.source) }
         WebSearchResult(cleaned, context, citations)
     }
 
     /** Port of directDuckDuckGoSearch in iphone/AetherChat/AetherWebSearchService.swift. */
-    private fun directDuckDuckGoSearch(cleaned: String, searchQuery: String): WebSearchResult {
+    private suspend fun directDuckDuckGoSearch(cleaned: String, searchQuery: String): WebSearchResult {
         val encoded = URLEncoder.encode(searchQuery, "UTF-8")
         val connection = URL("https://lite.duckduckgo.com/lite/?q=$encoded")
             .openConnection() as HttpURLConnection
@@ -174,14 +193,103 @@ class WebSearchService {
         if (connection.responseCode !in 200..299) throw IllegalStateException("Search unavailable")
 
         val html = connection.inputStream.bufferedReader().use { it.readText() }
-        val documents = rankDocuments(duckDuckGoLiteDocuments(html), cleaned)
-        if (documents.isEmpty()) throw IllegalStateException("No search results")
+        val ranked = rankDocuments(duckDuckGoLiteDocuments(html), cleaned)
+        if (ranked.isEmpty()) throw IllegalStateException("No search results")
+        val documents = enrichDocuments(ranked, cleaned)
 
         return WebSearchResult(
             query = cleaned,
             context = formatContext(cleaned, searchQuery, documents, ""),
             citations = documents.take(4).map { WebCitation(it.title, it.url, it.source) }
         )
+    }
+
+    /**
+     * Port of enrichDocuments on iOS — the top four ranked documents get their full
+     * article text fetched concurrently so the prompt can cite passages, not just
+     * search snippets. Failures simply leave a document without evidence.
+     */
+    private suspend fun enrichDocuments(documents: List<SearchDocument>, query: String): List<SearchDocument> {
+        val candidates = documents.take(4)
+        val evidenceByIndex = coroutineScope {
+            candidates.mapIndexed { index, document ->
+                async {
+                    coroutineContext.ensureActive()
+                    index to runCatching { fetchArticleEvidence(document.url, query) }.getOrNull()
+                }
+            }.awaitAll()
+                .mapNotNull { (index, evidence) ->
+                    if (evidence.isNullOrEmpty()) null else index to evidence
+                }
+                .toMap()
+        }
+        return documents.mapIndexed { index, document ->
+            coroutineContext.ensureActive()
+            evidenceByIndex[index]?.let { document.withEvidence(it) } ?: document
+        }
+    }
+
+    /** Port of fetchArticleEvidence on iOS — reads the article through the r.jina.ai proxy. */
+    private suspend fun fetchArticleEvidence(rawUrl: String, query: String): String? {
+        coroutineContext.ensureActive()
+        val source = try {
+            URL(rawUrl)
+        } catch (_: Exception) {
+            return null
+        }
+        val scheme = source.protocol?.lowercase()
+        val host = source.host
+        if (scheme !in listOf("http", "https") || host.isNullOrEmpty()) return null
+
+        val readerUrl = URL(
+            "https://r.jina.ai/http://$host${source.path}" +
+                (source.query?.let { "?$it" } ?: "")
+        )
+        val markdown = try {
+            (readerUrl.openConnection() as HttpURLConnection).run {
+                setRequestProperty("User-Agent", "CanopyChat/1.0 article retrieval")
+                connectTimeout = 12_000
+                readTimeout = 12_000
+                if (responseCode !in 200..299) return null
+                inputStream.bufferedReader().readText()
+            }
+        } catch (_: Exception) {
+            return null
+        }
+
+        return relevantPassages(markdown, query, 2_000)
+    }
+
+    /** Port of relevantPassages(from:query:maxCharacters:) on iOS. */
+    private suspend fun relevantPassages(markdown: String, query: String, maxCharacters: Int): String {
+        val terms = query.lowercase()
+            .split(Regex("[^\\p{L}\\p{N}]+"))
+            .filter { it.length >= 3 && it !in SEARCH_STOP_WORDS }
+            .toSet()
+        val paragraphs = markdown
+            .replace("\r\n", "\n")
+            .split("\n\n")
+            .map { cleanMarkdown(it) }
+            .filter { it.length >= 40 }
+
+        if (paragraphs.isEmpty()) return ""
+        val scored = paragraphs.mapIndexed { index, paragraph ->
+            coroutineContext.ensureActive()
+            val lowercased = paragraph.lowercase()
+            Triple(index, terms.count { it in lowercased }, paragraph)
+        }
+        val selected = scored
+            .sortedWith(compareByDescending<Triple<Int, Int, String>> { it.second }.thenBy { it.first })
+            .take(4)
+            .sortedBy { it.first }
+
+        var output = ""
+        for ((_, _, paragraph) in selected) {
+            val addition = if (output.isEmpty()) paragraph else "\n\n$paragraph"
+            if (output.length + addition.length > maxCharacters) break
+            output += addition
+        }
+        return output
     }
 
     /** Port of duckDuckGoLiteDocuments(fromHTML:) on iOS. */
@@ -354,13 +462,28 @@ class WebSearchService {
     ): String {
         if (documents.isNotEmpty()) {
             val resultText = documents.take(6).mapIndexed { index, document ->
-                """
+                var text = """
                 [${index + 1}] ${document.title}
                 Source: ${document.source}
                 URL: ${document.url}
-                Snippet: ${document.snippet}
+                Search snippet: ${document.snippet}
                 """.trimIndent()
+                if (document.evidence.isNotEmpty()) {
+                    text += "\nArticle evidence:\n${document.evidence}"
+                }
+                text
             }.joinToString("\n\n")
+
+            val sportsRules = if (isSportsTournamentQuery(query.lowercase())) {
+                """
+                - For sports tournament questions, answer the exact question only. If the user asks who/what teams are left, list only teams explicitly supported by the ranked sources.
+                - Do not add FIFA rankings, power rankings, contenders, host facts, final-site facts, predictions, or favorites unless the user explicitly asks for them and a ranked source explicitly supports them.
+                - If a ranked source says a team lost, was eliminated, or was knocked out, do not also describe that team as remaining or a top contender.
+                - If the ranked sources do not provide a reliable complete list, say the search results do not provide a reliable complete list instead of filling gaps.
+                """.trimIndent()
+            } else {
+                ""
+            }
 
             return """
             Web search was performed for: $query
@@ -370,6 +493,9 @@ class WebSearchService {
             Grounding rules:
             - Prefer higher-ranked sources first. Reuters, SEC, Nasdaq, AP, CNBC, Yahoo Finance, and official company/investor pages outrank SEO blogs, ads, and anonymous trackers.
             - For public-company, IPO, ticker, stock, price, and date questions, answer only what these sources explicitly support.
+            $sportsRules
+            - Use article evidence before relying on a search snippet. The evidence belongs to the URL immediately above it.
+            - Do not use general knowledge to fill a gap in the search results. If the results do not explicitly establish a winner, location, date, score, or status, say that the search results do not establish it.
             - Treat "planned", "targeted", "expected", and "projected" claims as stale when stronger sources say the event priced, raised money, listed, began trading, or completed.
             - If sources conflict, say that the results conflict and summarize the strongest source rather than inventing a compromise.
             - Do not repeat claims from sponsored links or low-ranked snippets when a higher-ranked source disagrees.
@@ -389,6 +515,7 @@ class WebSearchService {
         Grounding rules:
         - Answer only facts explicitly present in the search text below.
         - If the search text is noisy or contradictory, say that and avoid inventing dates, tickers, prices, or amounts.
+        - Do not use general knowledge to fill a gap in the search results. If the results do not explicitly establish the answer, say so.
 
         Search results:
         $trimmed

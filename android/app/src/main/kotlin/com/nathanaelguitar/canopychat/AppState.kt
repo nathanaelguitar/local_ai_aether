@@ -3,18 +3,24 @@ package com.nathanaelguitar.canopychat
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.nathanaelguitar.canopychat.core.ActiveModelVersion
 import com.nathanaelguitar.canopychat.core.AssistantPersona
+import com.nathanaelguitar.canopychat.core.BetaTelemetry
 import com.nathanaelguitar.canopychat.core.CanopyLocationService
 import com.nathanaelguitar.canopychat.core.CanopyNetworkMonitor
 import com.nathanaelguitar.canopychat.core.CanopyNotifications
 import com.nathanaelguitar.canopychat.core.ChatAttachment
 import com.nathanaelguitar.canopychat.core.ChatMessage
 import com.nathanaelguitar.canopychat.core.Conversation
+import com.nathanaelguitar.canopychat.core.DeletedConversation
 import com.nathanaelguitar.canopychat.core.InferenceProvider
 import com.nathanaelguitar.canopychat.core.MemoryPlanner
 import com.nathanaelguitar.canopychat.core.MemoryStore
 import com.nathanaelguitar.canopychat.core.MessageRole
 import com.nathanaelguitar.canopychat.core.ModelCatalog
+import com.nathanaelguitar.canopychat.core.PrivateModelDelivery
+import com.nathanaelguitar.canopychat.core.ResponseNormalizer
+import com.nathanaelguitar.canopychat.core.TelemetryEventType
 import com.nathanaelguitar.canopychat.core.TitleGenerator
 import com.nathanaelguitar.canopychat.core.WebSearchIntent
 import com.nathanaelguitar.canopychat.core.WebSearchService
@@ -39,9 +45,108 @@ class AppState(application: Application) : AndroidViewModel(application) {
     private val webSearch = WebSearchService()
     private val locationService = CanopyLocationService(application)
     private val networkMonitor = CanopyNetworkMonitor(application)
-    private val modelStore = ModelStore(application.filesDir)
+    private val modelStore = ModelStore(application)
     private val onDevice = LlamaCppEngine(modelStore)
     private val backend = BackendInferenceEngine { apiEndpoint.value }
+
+    init {
+        ActiveModelVersion.init(application)
+    }
+
+    // MARK: Recently Deleted (port of the Recently Deleted block in iphone/AetherChat/Models.swift)
+
+    private val _recentlyDeleted = MutableStateFlow<List<DeletedConversation>>(emptyList())
+    val recentlyDeleted: StateFlow<List<DeletedConversation>> = _recentlyDeleted.asStateFlow()
+
+    private val recentlyDeletedFile
+        get() = java.io.File(getApplication<Application>().filesDir, "RecentlyDeletedConversations.json")
+
+    private fun loadRecentlyDeleted() {
+        val file = recentlyDeletedFile
+        if (!file.exists()) return
+        runCatching {
+            val array = JSONArray(file.readText())
+            _recentlyDeleted.value = (0 until array.length()).map {
+                DeletedConversation.fromJson(array.getJSONObject(it))
+            }
+        }
+    }
+
+    private fun saveRecentlyDeleted() {
+        runCatching {
+            val array = JSONArray()
+            _recentlyDeleted.value.forEach { array.put(it.toJson()) }
+            recentlyDeletedFile.writeText(array.toString())
+        }
+    }
+
+    fun restoreDeleted(id: UUID) {
+        val entry = _recentlyDeleted.value.firstOrNull { it.id == id } ?: return
+        _recentlyDeleted.value = _recentlyDeleted.value.filterNot { it.id == id }
+        _conversations.value = listOf(entry.conversation) + _conversations.value
+        memoryStore.saveConversation(entry.conversation)
+        saveRecentlyDeleted()
+    }
+
+    fun permanentlyDeleteConversation(id: UUID) {
+        _recentlyDeleted.value = _recentlyDeleted.value.filterNot { it.id == id }
+        saveRecentlyDeleted()
+    }
+
+    fun emptyRecentlyDeleted() {
+        _recentlyDeleted.value = emptyList()
+        saveRecentlyDeleted()
+    }
+
+    private fun purgeExpiredDeletedConversations() {
+        val cutoff = System.currentTimeMillis() - DELETED_RETENTION_DAYS * 86_400_000L
+        val kept = _recentlyDeleted.value.filter { it.deletedAtMillis > cutoff }
+        if (kept.size != _recentlyDeleted.value.size) {
+            _recentlyDeleted.value = kept
+            saveRecentlyDeleted()
+        }
+    }
+
+    /**
+     * Migrates only the untouched built-in examples. User-created or edited
+     * conversations are left intact, and no local conversations are deleted.
+     * Port of migrateStockConversationsIfNeeded in iphone/AetherChat/Models.swift.
+     */
+    private fun migrateStockConversationsIfNeeded() {
+        data class Migration(val oldTitle: String, val oldPrompt: String, val newTitle: String)
+        val migrations = listOf(
+            Migration("Two-Week Launch Plan", "Help me plan a small product launch in two weeks.", "Morning Reflection"),
+            Migration("Coffee Before the Market", "Find a quiet coffee shop near the farmers market that opens early.", "Dinner From What's Left"),
+            Migration("Eco Brand Taglines", "Write taglines for a refill shop that cuts single-use plastic.", "Are These Leftovers Still Good?"),
+            Migration("Customer Follow-Up Email", "Draft a friendly follow-up email to a customer who went quiet after a demo.", "A Text I Keep Putting Off"),
+            Migration("Reading a Nutrition Label", "This granola says: serving 1/4 cup, sugar 11g, ingredients: whole oats, cane sugar, honey, brown rice syrup, almonds. Is it actually healthy?", "Making Sense of a Car Repair Quote")
+        )
+
+        val samples = sampleConversations()
+        var migratedAny = false
+        for (migration in migrations) {
+            val index = _conversations.value.indexOfFirst {
+                it.title == migration.oldTitle &&
+                    it.messages.firstOrNull()?.role == MessageRole.USER &&
+                    it.messages.firstOrNull()?.content == migration.oldPrompt
+            }
+            if (index < 0) continue
+            val replacement = samples.firstOrNull { it.title == migration.newTitle } ?: continue
+            val existingId = _conversations.value[index].id
+            _conversations.value = _conversations.value.mapIndexed { i, conversation ->
+                if (i == index) replacement.copy(id = existingId) else conversation
+            }
+            migratedAny = true
+        }
+
+        if (migratedAny && _conversations.value.none { it.title == "Morning Reflection" }) {
+            _conversations.value = listOf(samples[0]) + _conversations.value
+        }
+    }
+
+    companion object {
+        const val DELETED_RETENTION_DAYS = 30L
+    }
 
     private val _conversations = MutableStateFlow<List<Conversation>>(emptyList())
     val conversations: StateFlow<List<Conversation>> = _conversations.asStateFlow()
@@ -73,6 +178,13 @@ class AppState(application: Application) : AndroidViewModel(application) {
     val customSystemPrompt = MutableStateFlow(prefs.getString("customSystemPrompt", "") ?: "")
     val inferenceProvider = MutableStateFlow(InferenceProvider.from(prefs.getString("inferenceProvider", null)))
     val isDarkTheme = MutableStateFlow(prefs.getBoolean("isDarkTheme", false))
+
+    /** Mirrors AppState.webSearchEnabled on iOS: when off, no search runs even on intent. */
+    val webSearchEnabled = MutableStateFlow(prefs.getBoolean("webSearchEnabled", true))
+
+    /** Mirrors AppState.streamingPreview on iOS — live tokens during on-device generation. */
+    private val _streamingPreview = MutableStateFlow<String?>(null)
+    val streamingPreview: StateFlow<String?> = _streamingPreview.asStateFlow()
     val defaultWorkspaceId = MutableStateFlow(prefs.getString("defaultWorkspaceId", "personal") ?: "personal")
     val messageFontScale = MutableStateFlow(
         prefs.getFloat("messageFontScale", 1.0f).toDouble().takeIf { it > 0.0 } ?: 1.0
@@ -119,7 +231,13 @@ class AppState(application: Application) : AndroidViewModel(application) {
         } else {
             saved.map(::canonicalizeConversation).map(TitleGenerator::repairIfNeeded)
         }
-        removeLegacySeedConversations()
+        migrateStockConversationsIfNeeded()
+        // Seed conversations are intentionally preserved. Keep the old cleanup
+        // routine below for reference, but never delete user-visible chats at launch.
+        // removeLegacySeedConversations()
+        _conversations.value.forEach { memoryStore.saveConversation(it) }
+        loadRecentlyDeleted()
+        purgeExpiredDeletedConversations()
     }
 
     /**
@@ -145,9 +263,10 @@ class AppState(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Port of removeLegacySeedConversations in iphone/AetherChat/Models.swift — drops
-     * the pre-rename starter chats so upgrading installs don't keep stale samples.
+     * Kept for reference, mirroring the disabled routine in iphone/AetherChat/Models.swift.
+     * Intentionally never called: user-visible chats must not be deleted at launch.
      */
+    @Suppress("unused")
     private fun removeLegacySeedConversations() {
         val legacySeedTitles = setOf(
             "Morning Reflection",
@@ -164,6 +283,68 @@ class AppState(application: Application) : AndroidViewModel(application) {
     fun setDarkTheme(enabled: Boolean) {
         isDarkTheme.value = enabled
         prefs.edit().putBoolean("isDarkTheme", enabled).apply()
+    }
+
+    /** Port of webSearchEnabled's didSet on iOS. */
+    fun setWebSearchEnabled(enabled: Boolean) {
+        webSearchEnabled.value = enabled
+        prefs.edit().putBoolean("webSearchEnabled", enabled).apply()
+    }
+
+    internal fun updateStreamingPreview(preview: String?) {
+        _streamingPreview.value = preview
+    }
+
+    // MARK: Contributor telemetry (port of the AetherBetaTelemetry.shared.record call sites)
+
+    fun recordResponseRating(conversationId: UUID, messageId: UUID, response: String, rating: String) {
+        BetaTelemetry.shared(getApplication()).record(
+            TelemetryEventType.RESPONSE_RATED,
+            conversationId = conversationId,
+            messageId = messageId,
+            response = response,
+            metadata = mapOf("rating" to rating)
+        )
+    }
+
+    fun recordUserCorrection(conversationId: UUID, messageId: UUID, prompt: String?, response: String, correction: String) {
+        BetaTelemetry.shared(getApplication()).record(
+            TelemetryEventType.USER_CORRECTION,
+            conversationId = conversationId,
+            messageId = messageId,
+            prompt = prompt,
+            response = response,
+            metadata = mapOf("user_correction" to correction.take(1_024))
+        )
+    }
+
+    fun recordResponseRegenerated(conversationId: UUID, messageId: UUID) {
+        BetaTelemetry.shared(getApplication()).record(
+            TelemetryEventType.RESPONSE_REGENERATED,
+            conversationId = conversationId,
+            messageId = messageId
+        )
+    }
+
+    fun recordMessageResent(conversationId: UUID, messageId: UUID, prompt: String) {
+        BetaTelemetry.shared(getApplication()).record(
+            TelemetryEventType.MESSAGE_RESENT,
+            conversationId = conversationId,
+            messageId = messageId,
+            prompt = prompt
+        )
+    }
+
+    fun recordIssueReported(conversationId: UUID?) {
+        BetaTelemetry.shared(getApplication()).record(
+            TelemetryEventType.ISSUE_REPORTED,
+            conversationId = conversationId
+        )
+    }
+
+    /** Mirrors ContentView.onChange(of: scenePhase) on iOS. */
+    fun flushContributorTelemetry() {
+        BetaTelemetry.shared(getApplication()).flushPendingBatch()
     }
 
     fun setApiEndpoint(endpoint: String) {
@@ -262,7 +443,12 @@ class AppState(application: Application) : AndroidViewModel(application) {
         return conversation.id
     }
 
+    /** Port of delete(_:) on iOS — soft-deletes into Recently Deleted for 30 days. */
     fun deleteConversation(id: UUID) {
+        _conversations.value.firstOrNull { it.id == id }?.let { conversation ->
+            _recentlyDeleted.value = listOf(DeletedConversation(conversation)) + _recentlyDeleted.value
+            saveRecentlyDeleted()
+        }
         _conversations.value = _conversations.value.filterNot { it.id == id }
         memoryStore.deleteConversation(id)
     }
@@ -374,6 +560,7 @@ class AppState(application: Application) : AndroidViewModel(application) {
                     _isSending.value = false
                     _generationStatus.value = null
                     _modelLoadingMessage.value = null
+                    _streamingPreview.value = null
                 }
             }
         }
@@ -398,18 +585,22 @@ class AppState(application: Application) : AndroidViewModel(application) {
 
             var webSearchContext: String? = null
             var webSourcesMarkdown: String? = null
-            WebSearchIntent.query(latestUserText, priorMessages)?.let { rawWebQuery ->
-                if (networkMonitor.hasReceivedStatus && !networkMonitor.isConnected.value) {
-                    webSearchContext = offlineWebContext(rawWebQuery, conversationId)
-                } else {
-                    _generationStatus.value = "Searching the web"
-                    try {
-                        val webQuery = locationService.localizeSearchQuery(rawWebQuery, latestUserText)
-                        val result = webSearch.search(webQuery)
-                        webSearchContext = result.context.ifEmpty { null }
-                        webSourcesMarkdown = result.sourcesMarkdown
-                    } catch (_: Exception) {
+            // Mirrors generateAndAppendReply on iOS: the Web Search toggle is binding —
+            // when it is off, no search runs even if intent is detected.
+            if (webSearchEnabled.value) {
+                WebSearchIntent.query(latestUserText, priorMessages)?.let { rawWebQuery ->
+                    if (networkMonitor.hasReceivedStatus && !networkMonitor.isConnected.value) {
                         webSearchContext = offlineWebContext(rawWebQuery, conversationId)
+                    } else {
+                        _generationStatus.value = "Searching the web"
+                        try {
+                            val webQuery = locationService.localizeSearchQuery(rawWebQuery, latestUserText)
+                            val result = webSearch.search(webQuery)
+                            webSearchContext = result.context.ifEmpty { null }
+                            webSourcesMarkdown = result.sourcesMarkdown
+                        } catch (_: Exception) {
+                            webSearchContext = offlineWebContext(rawWebQuery, conversationId)
+                        }
                     }
                 }
             }
@@ -440,9 +631,31 @@ class AppState(application: Application) : AndroidViewModel(application) {
             }
 
             response = responseWithSources(response, webSourcesMarkdown)
+            // Mirrors AetherResponseNormalizer.displayText applied post-generation on iOS.
+            response = ResponseNormalizer.displayText(response)
             _modelLoadingMessage.value = null
             _generationStatus.value = null
+            _streamingPreview.value = null
             appendAssistantMessage(conversationId, response)
+            // Mirrors the responseGenerated telemetry call site in iphone/AetherChat/Models.swift.
+            BetaTelemetry.shared(getApplication()).record(
+                TelemetryEventType.RESPONSE_GENERATED,
+                conversationId = conversationId,
+                prompt = latestUserText,
+                response = response,
+                metadata = if (webSearchContext != null) {
+                    mapOf("web_search" to "true")
+                } else {
+                    emptyMap()
+                }
+            )
+            if (webSourcesMarkdown != null) {
+                BetaTelemetry.shared(getApplication()).record(
+                    TelemetryEventType.WEB_SEARCH_PERFORMED,
+                    conversationId = conversationId,
+                    prompt = latestUserText
+                )
+            }
             notifyIfNeeded(conversationId, response)
         } catch (cancellation: CancellationException) {
             _modelLoadingMessage.value = null
@@ -454,6 +667,12 @@ class AppState(application: Application) : AndroidViewModel(application) {
         } catch (error: Exception) {
             _modelLoadingMessage.value = null
             _generationStatus.value = null
+            BetaTelemetry.shared(getApplication()).record(
+                TelemetryEventType.INFERENCE_FAILED,
+                conversationId = conversationId,
+                prompt = latestUserText,
+                metadata = mapOf("error" to inferenceErrorDescription(error).take(256))
+            )
             val message = localBackgroundInterruptionMessage(error)
                 ?: "Inference error: ${inferenceErrorDescription(error)}"
             appendAssistantMessage(conversationId, message)
@@ -500,7 +719,12 @@ class AppState(application: Application) : AndroidViewModel(application) {
             )
         }
         val engine = if (wantsOnDevice) onDevice else backend
-        return engine.send(persona, messages, webSearchContext, memoryContext, customSystemPrompt) { status ->
+        // Mirrors generateReply on iOS: the preview resets before an on-device send,
+        // then accumulates one piece per decoded token.
+        if (wantsOnDevice) _streamingPreview.value = null
+        return engine.send(persona, messages, webSearchContext, memoryContext, customSystemPrompt, onToken = { piece ->
+            _streamingPreview.value = (_streamingPreview.value ?: "") + piece
+        }) { status ->
             if (status != null) {
                 _modelLoadingMessage.value = status
             } else {
@@ -604,59 +828,106 @@ class AppState(application: Application) : AndroidViewModel(application) {
         super.onCleared()
     }
 
-    private fun sampleConversations(): List<Conversation> = listOf(
-        Conversation(
-            title = "Product Launch Checklist",
-            workspace = Workspace.WORK,
-            persona = AssistantPersona.ANALYTICAL,
-            isPinned = true,
-            previewText = "Here's a two-week launch checklist, working backward from release day...",
-            messages = listOf(
-                ChatMessage(role = MessageRole.USER, content = "Help me build a launch checklist for a small product release in two weeks."),
-                ChatMessage(role = MessageRole.ASSISTANT, content = "Here's a two-week launch checklist, working backward from release day: finalize pricing and positioning this week, then line up announcement copy, support docs, and a rollback plan for week two. Want me to expand any of these into daily tasks?")
-            )
-        ),
-        Conversation(
-            title = "Dinner From What's Left",
-            workspace = Workspace.PERSONAL,
-            persona = AssistantPersona.DEFAULT,
-            previewText = "That's enough for a solid one-pan dinner...",
-            messages = listOf(
-                ChatMessage(role = MessageRole.USER, content = "I have chicken thighs, half an onion, rice, and a lemon. What can I make for dinner?"),
-                ChatMessage(role = MessageRole.ASSISTANT, content = "That's enough for a solid one-pan dinner — lemon chicken and rice. Brown the salted thighs skin-side down in an oven-safe pan, set them aside, then soften the onion and toast the rice in the same fat. Add 1½ cups water per cup of rice, squeeze in half the lemon, nestle the chicken back on top, and bake covered at 375°F for 25 minutes.\n\nSqueeze the other lemon half over everything right before serving — that's what makes it taste finished rather than plain.")
-            )
-        ),
-        Conversation(
-            title = "Are These Leftovers Still Good?",
-            workspace = Workspace.PERSONAL,
-            persona = AssistantPersona.CONCISE,
-            previewText = "Four days is the outer limit for cooked chicken...",
-            messages = listOf(
-                ChatMessage(role = MessageRole.USER, content = "How long is cooked chicken safe in the fridge? Mine's been in there since Sunday."),
-                ChatMessage(role = MessageRole.ASSISTANT, content = "Four days is the outer limit for cooked chicken in the fridge at 40°F or below.\n\nIf Sunday was more than four days ago, throw it out — smell isn't a reliable test, since the bacteria that cause illness don't change how food looks or smells. To buy more time next round, freeze it within a day or two; it keeps for months at 0°F.\n\nSources\n- [FoodSafety.gov — Cold Food Storage Chart](https://www.foodsafety.gov/food-safety-charts/cold-food-storage-charts)")
-            )
-        ),
-        Conversation(
-            title = "The Text I Keep Putting Off",
-            workspace = Workspace.CREATIVE,
-            persona = AssistantPersona.CREATIVE,
-            previewText = "Here's a version that's warm but doesn't over-explain...",
-            messages = listOf(
-                ChatMessage(role = MessageRole.USER, content = "I need to cancel dinner plans with a friend tonight and I feel bad about it. Help me word the text."),
-                ChatMessage(role = MessageRole.ASSISTANT, content = "Here's a version that's warm but doesn't over-explain:\n\n\"Hey — I'm so sorry, I have to bail on tonight. I'm running on empty and I'd be bad company. Can we do next week instead? I'll pick the place.\"\n\nIt apologizes once rather than three times, gives a reason without an essay, and offers the next date immediately so it reads as a reschedule instead of a fade. Want a shorter version?")
-            )
-        ),
-        Conversation(
-            title = "Making Sense of a Car Repair Quote",
-            workspace = Workspace.RESEARCH,
-            persona = AssistantPersona.ANALYTICAL,
-            previewText = "Three of those four lines are worth questioning...",
-            messages = listOf(
-                ChatMessage(role = MessageRole.USER, content = "The shop quoted me \$1,240: brake pads and rotors \$610, brake fluid flush \$150, engine air filter \$95, shop supplies \$85, labor \$300. Is any of that padding?"),
-                ChatMessage(role = MessageRole.ASSISTANT, content = "Three of those four lines are worth questioning:\n\n- **Pads and rotors at \$610** — reasonable if that covers all four wheels, high if it's only the front. Ask which axles are included before anything else.\n- **Engine air filter at \$95** — the part itself is usually \$20-30 and takes a few minutes to swap. This is the easiest line to decline and do yourself.\n- **Shop supplies at \$85** — a percentage-based catch-all fee. Many shops will reduce or drop it if you ask.\n- **Brake fluid flush at \$150** — legitimate maintenance, but only if it's actually due. Ask when it was last done.\n\nAsk for the itemized parts numbers and the labor hours. A shop that won't put those in writing is telling you something.")
+    private fun sampleConversations(): List<Conversation> {
+        val now = System.currentTimeMillis()
+        return listOf(
+            Conversation(
+                title = "Morning Reflection",
+                workspace = Workspace.PERSONAL,
+                persona = AssistantPersona.DEFAULT,
+                isPinned = true,
+                previewText = "What does a good day look like for you?",
+                updatedAtMillis = now,
+                messages = listOf(
+                    ChatMessage(role = MessageRole.USER, content = "I want to reflect on my goals this week."),
+                    ChatMessage(role = MessageRole.ASSISTANT, content = "What does a good day look like for you?")
+                )
+            ),
+            Conversation(
+                title = "Dinner From What's Left",
+                workspace = Workspace.PERSONAL,
+                persona = AssistantPersona.DEFAULT,
+                previewText = "That's enough for a solid one-pan dinner...",
+                updatedAtMillis = now - 3_600_000,
+                messages = listOf(
+                    ChatMessage(role = MessageRole.USER, content = "I have chicken thighs, half an onion, rice, and a lemon. What can I make for dinner?", timestampMillis = now - 3_660_000),
+                    ChatMessage(role = MessageRole.ASSISTANT, content = """
+                        That's enough for a solid one-pan dinner — lemon chicken and rice:
+
+                        1. Salt the thighs and brown them skin-side down in an oven-safe pan, about 6 minutes. Set them aside.
+                        2. Cook the onion in the same pan until soft, then stir in the rice for a minute so it picks up the fat.
+                        3. Add 1½ cups water per cup of rice, squeeze in half the lemon, and nestle the chicken back on top.
+                        4. Cover and bake at 375°F for 25 minutes, then rest 5 minutes off the heat.
+
+                        Squeeze the other lemon half over everything right before serving — that's what makes it taste finished rather than plain.
+                    """.trimIndent(), timestampMillis = now - 3_600_000)
+                )
+            ),
+            Conversation(
+                title = "Are These Leftovers Still Good?",
+                workspace = Workspace.PERSONAL,
+                persona = AssistantPersona.CONCISE,
+                previewText = "Four days is the outer limit for cooked chicken...",
+                updatedAtMillis = now - 9_000_000,
+                messages = listOf(
+                    ChatMessage(role = MessageRole.USER, content = "How long is cooked chicken safe in the fridge? Mine's been in there since Sunday.", timestampMillis = now - 9_060_000),
+                    ChatMessage(role = MessageRole.ASSISTANT, content = """
+                        Four days is the outer limit for cooked chicken in the fridge at 40°F or below.
+
+                        If Sunday was more than four days ago, throw it out — smell isn't a reliable test, since the bacteria that cause illness don't change how food looks or smells.
+
+                        To buy more time next round, freeze it within a day or two; it keeps for months at 0°F.
+
+                        Sources
+                        - [FoodSafety.gov — Cold Food Storage Chart](https://www.foodsafety.gov/food-safety-charts/cold-food-storage-charts)
+                    """.trimIndent(), timestampMillis = now - 9_000_000)
+                )
+            ),
+            Conversation(
+                title = "A Text I Keep Putting Off",
+                workspace = Workspace.CREATIVE,
+                persona = AssistantPersona.CREATIVE,
+                previewText = "Here's a version that's warm but doesn't over-explain...",
+                updatedAtMillis = now - 26_000_000,
+                messages = listOf(
+                    ChatMessage(role = MessageRole.USER, content = "I need to cancel dinner plans with a friend tonight and I feel bad about it. Help me word the text.", timestampMillis = now - 26_060_000),
+                    ChatMessage(role = MessageRole.ASSISTANT, content = """
+                        Here's a version that's warm but doesn't over-explain:
+
+                        "Hey — I'm so sorry, I have to bail on tonight. I'm running on empty and I'd be bad company. Can we do next week instead? I'll pick the place."
+
+                        Three things it does on purpose:
+
+                        - **Apologizes once**, not three times — repeated apologies make the other person reassure you
+                        - **Gives a reason without an essay** — one honest line lands better than a paragraph of justification
+                        - **Offers the next date immediately**, so it reads as a reschedule, not a fade
+
+                        Want a shorter version, or one for a friend you cancel on often?
+                    """.trimIndent(), timestampMillis = now - 26_000_000)
+                )
+            ),
+            Conversation(
+                title = "Making Sense of a Car Repair Quote",
+                workspace = Workspace.RESEARCH,
+                persona = AssistantPersona.ANALYTICAL,
+                previewText = "Three of those four lines are worth questioning...",
+                updatedAtMillis = now - 90_000_000,
+                messages = listOf(
+                    ChatMessage(role = MessageRole.USER, content = "The shop quoted me $1,240: brake pads and rotors $610, brake fluid flush $150, engine air filter $95, shop supplies $85, labor $300. Is any of that padding?", timestampMillis = now - 90_060_000),
+                    ChatMessage(role = MessageRole.ASSISTANT, content = """
+                        Three of those four lines are worth questioning:
+
+                        - **Pads and rotors at $610** — reasonable if that covers all four wheels, high if it's only the front. Ask which axles are included before anything else.
+                        - **Engine air filter at $95** — the part itself is usually $20-30 and takes a few minutes to swap. This is the easiest line to decline and do yourself.
+                        - **Shop supplies at $85** — a percentage-based catch-all fee. Many shops will reduce or drop it if you ask.
+                        - **Brake fluid flush at $150** — legitimate maintenance, but only if it's actually due. Ask when it was last done.
+
+                        Ask for the itemized parts numbers and the labor hours. A shop that won't put those in writing is telling you something.
+                    """.trimIndent(), timestampMillis = now - 90_000_000)
+                )
             )
         )
-    )
+    }
 }
 
 // Port of the loop-detection helpers in AppState (iphone/AetherChat/Models.swift).
