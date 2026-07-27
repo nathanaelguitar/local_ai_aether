@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -66,6 +67,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
@@ -832,7 +834,7 @@ private fun WorkspaceChips(
         modifier = Modifier
             .fillMaxWidth()
             .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 24.dp),
+            .padding(horizontal = 20.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         WorkspaceChip(
@@ -856,13 +858,17 @@ private fun WorkspaceChips(
 private fun WorkspaceChip(label: String, selected: Boolean, color: Color, isDark: Boolean, onClick: () -> Unit) {
     val background = if (selected) color else color.copy(alpha = if (isDark) 0.22f else 0.14f)
     val foreground = if (selected) Color.White else color
+    // Sized to match WorkspaceChip in iphone/AetherChat/ConversationListView.swift
+    // (14pt medium, 14/7 padding). The previous 15sp SemiBold at 18/10 ran wide enough
+    // that the next chip no longer peeked past the screen edge.
     Box(
         modifier = Modifier
-            .background(background, RoundedCornerShape(22.dp))
+            .clip(CircleShape)
+            .background(background)
             .clickable(onClick = onClick)
-            .padding(horizontal = 18.dp, vertical = 10.dp)
+            .padding(horizontal = 14.dp, vertical = 7.dp)
     ) {
-        Text(label, color = foreground, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+        Text(label, color = foreground, fontWeight = FontWeight.Medium, fontSize = 14.sp)
     }
 }
 
@@ -1395,18 +1401,28 @@ fun ChatScreen(state: AppState, conversationId: UUID, onBack: () -> Unit, onNewC
                                 }
                             ),
                             RoundedCornerShape(26.dp)
-                        ),
-                    verticalAlignment = Alignment.Bottom
+                        )
+                        .padding(start = 8.dp),
+                    // iOS lays this out with a plain HStack, which centers; Bottom left the
+                    // + and the send circle sitting low against the pill.
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Box {
-                        IconButton(
-                            onClick = { showAttachMenu = true },
-                            enabled = !isSending
+                        // Mirrors InputAccessoryIcon on iOS: a 32x44 hit area with the glyph centered.
+                        Box(
+                            modifier = Modifier
+                                .size(width = 32.dp, height = 44.dp)
+                                .clickable(
+                                    enabled = !isSending,
+                                    onClickLabel = "Add attachment"
+                                ) { showAttachMenu = true },
+                            contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 Icons.Filled.Add,
                                 contentDescription = "Add attachment",
-                                tint = if (isDark) OakColors.warmGray400 else OakColors.warmGray500
+                                tint = if (isDark) OakColors.warmGray400 else OakColors.warmGray500,
+                                modifier = Modifier.size(22.dp)
                             )
                         }
                         DropdownMenu(
@@ -1468,31 +1484,50 @@ fun ChatScreen(state: AppState, conversationId: UUID, onBack: () -> Unit, onNewC
                     }
                     if (inputFocused) {
                         // iOS animates a keyboard-dismiss chevron in while the field is focused.
-                        IconButton(onClick = {
-                            focusManager.clearFocus()
-                            keyboardController?.hide()
-                        }) {
+                        Box(
+                            modifier = Modifier
+                                .size(width = 32.dp, height = 44.dp)
+                                .clickable(onClickLabel = "Dismiss keyboard") {
+                                    focusManager.clearFocus()
+                                    keyboardController?.hide()
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
                             Icon(
                                 Icons.Filled.KeyboardArrowDown,
                                 contentDescription = "Dismiss keyboard",
-                                tint = if (isDark) OakColors.warmGray400 else OakColors.warmGray500
+                                tint = if (isDark) OakColors.warmGray400 else OakColors.warmGray500,
+                                modifier = Modifier.size(22.dp)
                             )
                         }
                     }
-                    OutlinedTextField(
-                        value = input,
-                        onValueChange = { input = it },
+                    Box(
                         modifier = Modifier
                             .weight(1f)
-                            .onFocusChanged { inputFocused = it.isFocused },
-                        placeholder = { Text("Message your assistant...") },
-                        shape = RoundedCornerShape(20.dp),
-                        maxLines = 5,
-                        colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = Color.Transparent,
-                            unfocusedBorderColor = Color.Transparent
+                            .padding(horizontal = 8.dp, vertical = 13.dp),
+                        contentAlignment = Alignment.CenterStart
+                    ) {
+                        if (input.isEmpty()) {
+                            Text(
+                                "Message your assistant...",
+                                fontSize = 15.sp,
+                                color = if (isDark) OakColors.warmGray500 else OakColors.warmGray400
+                            )
+                        }
+                        BasicTextField(
+                            value = input,
+                            onValueChange = { input = it },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .onFocusChanged { inputFocused = it.isFocused },
+                            textStyle = androidx.compose.ui.text.TextStyle(
+                                fontSize = 15.sp,
+                                color = if (isDark) OakColors.warmGray100 else OakColors.warmBlack
+                            ),
+                            cursorBrush = SolidColor(OakColors.oakMedium),
+                            maxLines = 5
                         )
-                    )
+                    }
                     val canSend = input.isNotBlank() || attachments.isNotEmpty()
                     val sendScale by androidx.compose.animation.core.animateFloatAsState(
                         targetValue = if (canSend || isSending) 1f else 0.92f,
@@ -1502,9 +1537,10 @@ fun ChatScreen(state: AppState, conversationId: UUID, onBack: () -> Unit, onNewC
                         ),
                         label = "sendScale"
                     )
-                    IconButton(
-                        onClick = { if (isSending) state.stopSending() else sendText(input.trim()) },
-                        enabled = canSend || isSending,
+                    // IconButton enforces a 48dp minimum touch target, so squeezing it into
+                    // a 36dp circle left the glyph off-centre. A plain Box centres exactly,
+                    // matching the ZStack + Circle on iOS.
+                    Box(
                         modifier = Modifier
                             .padding(end = 6.dp)
                             .size(36.dp)
@@ -1522,6 +1558,11 @@ fun ChatScreen(state: AppState, conversationId: UUID, onBack: () -> Unit, onNewC
                                     Brush.verticalGradient(listOf(OakColors.oakLight, OakColors.oakMedium))
                                 }
                             )
+                            .clickable(
+                                enabled = canSend || isSending,
+                                onClickLabel = if (isSending) "Stop generating" else "Send"
+                            ) { if (isSending) state.stopSending() else sendText(input.trim()) },
+                        contentAlignment = Alignment.Center
                     ) {
                         if (isSending) {
                             Icon(
