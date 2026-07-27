@@ -214,7 +214,6 @@ std::string generate(
     llama_sampler_chain_add(sampler, llama_sampler_init_temp(0.8f));
     llama_sampler_chain_add(sampler, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
 
-    std::string result;
     std::string pending_piece_bytes;
     for (int i = 0; i < max_tokens; i++, position++) {
         const llama_token token = llama_sampler_sample(sampler, context, -1);
