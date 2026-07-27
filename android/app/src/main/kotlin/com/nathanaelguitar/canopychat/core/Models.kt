@@ -58,7 +58,25 @@ data class ChatMessage(
     val content: String,
     val attachments: List<ChatAttachment> = emptyList(),
     val timestampMillis: Long = System.currentTimeMillis()
-)
+) {
+    fun toJson(): JSONObject = JSONObject().apply {
+        put("id", id.toString())
+        put("role", role.rawValue)
+        put("content", content)
+        put("attachments", jsonArrayOfAttachments(attachments))
+        put("timestamp", timestampMillis)
+    }
+
+    companion object {
+        fun fromJson(json: JSONObject): ChatMessage = ChatMessage(
+            id = UUID.fromString(json.getString("id")),
+            role = MessageRole.from(json.getString("role")),
+            content = json.getString("content"),
+            attachments = attachmentsFromJsonArray(json.optString("attachments", "[]")),
+            timestampMillis = json.optLong("timestamp", System.currentTimeMillis())
+        )
+    }
+}
 
 data class Workspace(
     val id: String,
@@ -139,7 +157,56 @@ data class Conversation(
     var updatedAtMillis: Long = System.currentTimeMillis(),
     var messages: List<ChatMessage> = emptyList(),
     var memorySummary: String = ""
-)
+) {
+    fun toJson(): JSONObject = JSONObject().apply {
+        put("id", id.toString())
+        put("title", title)
+        put("workspace", workspace.toJson())
+        put("persona", persona.toJson())
+        put("isPinned", isPinned)
+        put("previewText", previewText)
+        put("updatedAt", updatedAtMillis)
+        put("memorySummary", memorySummary)
+        put("messages", JSONArray().apply { messages.forEach { put(it.toJson()) } })
+    }
+
+    companion object {
+        fun fromJson(json: JSONObject): Conversation {
+            val rawMessages = json.optJSONArray("messages") ?: JSONArray()
+            return Conversation(
+                id = UUID.fromString(json.getString("id")),
+                title = json.getString("title"),
+                workspace = Workspace.fromJson(json.getJSONObject("workspace")),
+                persona = AssistantPersona.fromJson(json.getJSONObject("persona")),
+                isPinned = json.optBoolean("isPinned", false),
+                previewText = json.optString("previewText", ""),
+                updatedAtMillis = json.optLong("updatedAt", System.currentTimeMillis()),
+                memorySummary = json.optString("memorySummary", ""),
+                messages = (0 until rawMessages.length()).map { ChatMessage.fromJson(rawMessages.getJSONObject(it)) }
+            )
+        }
+    }
+}
+
+/** Port of DeletedConversation in iphone/AetherChat/Models.swift. */
+data class DeletedConversation(
+    val conversation: Conversation,
+    val deletedAtMillis: Long = System.currentTimeMillis()
+) {
+    val id: UUID get() = conversation.id
+
+    fun toJson(): JSONObject = JSONObject().apply {
+        put("conversation", conversation.toJson())
+        put("deletedAt", deletedAtMillis)
+    }
+
+    companion object {
+        fun fromJson(json: JSONObject): DeletedConversation = DeletedConversation(
+            conversation = Conversation.fromJson(json.getJSONObject("conversation")),
+            deletedAtMillis = json.optLong("deletedAt", System.currentTimeMillis())
+        )
+    }
+}
 
 enum class InferenceProvider(val rawValue: String) {
     ON_DEVICE("On-device"),
@@ -153,10 +220,12 @@ enum class InferenceProvider(val rawValue: String) {
 
 object ModelCatalog {
     const val CANOPY_V1_DISPLAY_NAME = "Canopy V1"
+    const val MODEL_VERSION = "1.1.2"
     const val LEGACY_DISPLAY_NAME = "Aether V1"
-    const val GGUF_REPOSITORY = "mradermacher/Qwen3.5-2b-Kimi-and-Opus-Distillation-GGUF"
+    const val GGUF_REPOSITORY = "nathanaelguitar/canopy-1.1.2"
     const val GGUF_QUANTIZATION = "Q4_K_M"
-    const val GGUF_FILENAME = "Qwen3.5-2b-Kimi-and-Opus-Distillation.Q4_K_M.gguf"
+    const val GGUF_FILENAME = "canopy-1.1.2.Q4_K_M.gguf"
+    const val MMPROJ_REPOSITORY = "mradermacher/Qwen3.5-2b-Kimi-and-Opus-Distillation-GGUF"
     const val MMPROJ_FILENAME = "Qwen3.5-2b-Kimi-and-Opus-Distillation.mmproj-Q8_0.gguf"
 
     // A 20k KV cache is expensive on a phone and is rarely needed because the
@@ -165,14 +234,15 @@ object ModelCatalog {
     const val BATCH_TOKENS = 2_048
     const val IMAGE_MAX_TOKENS = 768
 
-    // 512 tokens was an observable hard stop for longer answers.
-    const val MAX_OUTPUT_TOKENS = 768
+    const val MAX_OUTPUT_TOKENS = 1_024
 
     val ggufDownloadUrl = "https://huggingface.co/$GGUF_REPOSITORY/resolve/main/$GGUF_FILENAME"
-    val mmprojDownloadUrl = "https://huggingface.co/$GGUF_REPOSITORY/resolve/main/$MMPROJ_FILENAME"
+    val mmprojDownloadUrl = "https://huggingface.co/$MMPROJ_REPOSITORY/resolve/main/$MMPROJ_FILENAME"
 
-    const val RUNTIME_MESSAGE =
-        "Canopy V1 runs locally with llama.cpp. The first on-device reply downloads about 1.7 GB, then caches the files on this device."
+    val RUNTIME_MESSAGE =
+        "Canopy V1 runs locally with llama.cpp using $GGUF_FILENAME and the $MMPROJ_FILENAME " +
+            "vision projector. The first on-device reply downloads about 1.7 GB, then caches " +
+            "the files on this device."
 }
 
 fun jsonArrayOfAttachments(attachments: List<ChatAttachment>): JSONArray {

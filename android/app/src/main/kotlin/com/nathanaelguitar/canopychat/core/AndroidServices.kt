@@ -8,18 +8,21 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.location.Geocoder
 import android.location.Location
+import android.location.LocationListener
 import android.location.LocationManager
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.os.Build
+import android.os.Looper
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -29,51 +32,116 @@ object CanopyLegal {
     const val PRIVACY_POLICY_URL = "https://nathanaelguitar.github.io/canopy_publicsite/privacy.html"
     const val TERMS_OF_USE_URL = "https://nathanaelguitar.github.io/canopy_publicsite/terms.html"
     const val SUPPORT_URL = "https://nathanaelguitar.github.io/canopy_publicsite/support.html"
-    const val SUPPORT_EMAIL = "consulting.nathanael@gmail.com"
+    // Matches CanopyFeedback.supportEmail in iphone/AetherChat/CanopyFeedback.swift.
+    const val SUPPORT_EMAIL = "support@canopychat.app"
 }
 
+/**
+ * Port of CanopyFeedback in iphone/AetherChat/CanopyFeedback.swift. The templates
+ * mirror the iOS structure so support emails carry the same sections and fields.
+ */
 object CanopyFeedback {
-    fun modelFeedback(message: ChatMessage, conversation: Conversation?): String =
-        """
+    fun modelFeedback(message: ChatMessage, conversation: Conversation?): String {
+        val prompt = promptText(message, conversation)
+        val cleanedResponse = plainText(message.content.trim())
+        return """
         CanopyChat Model Feedback
 
+        Thanks for taking a moment to report this. Your feedback helps us improve the model and make CanopyChat more useful. We work hard to provide the best service to our customers.
+
+        WHAT WENT WRONG?
+        Please tell us what was incorrect, confusing, incomplete, or unexpected.
+
+        WHAT WERE YOU EXPECTING?
+        If you can, describe the answer or behavior you wanted instead.
+
+
+        USER PROMPT
+        $prompt
+
+
+        MODEL RESPONSE
+        $cleanedResponse
+
+        Thank you for helping us make CanopyChat better.
+
+        TECHNICAL DETAILS FOR SUPPORT
         Conversation: ${conversation?.title ?: "Unknown"}
         Assistant: ${conversation?.persona?.name ?: "Unknown"}
         Message ID: ${message.id}
         Timestamp: ${timestamp()}
-        Device: ${Build.MANUFACTURER} ${Build.MODEL}
+        App Version: $appVersion
+        Device: ${Build.MODEL}
         Android: ${Build.VERSION.RELEASE}
-
-        What went wrong?
-
-
-        Model response:
-        ${message.content.trim()}
         """.trimIndent()
+    }
+
+    /** Port of CanopyFeedback.promptText(for:conversation:) on iOS. */
+    private fun promptText(message: ChatMessage, conversation: Conversation?): String {
+        val responseIndex = conversation?.messages?.indexOfFirst { it.id == message.id } ?: -1
+        val userMessage = if (responseIndex >= 0) {
+            conversation!!.messages.subList(0, responseIndex).lastOrNull { it.role == MessageRole.USER }
+        } else {
+            null
+        }
+        if (userMessage == null) return "(Prompt text unavailable.)"
+
+        val text = plainText(userMessage.content.trim())
+        if (text.isNotEmpty()) return text
+
+        val attachmentNames = userMessage.attachments.joinToString(", ") { it.displayName }
+        return if (attachmentNames.isEmpty()) {
+            "(No text prompt.)"
+        } else {
+            "(Attachment-only prompt: $attachmentNames)"
+        }
+    }
 
     fun appIssue(conversation: Conversation? = null): String =
         """
         CanopyChat Issue Report
 
-        Conversation: ${conversation?.title ?: "Not provided"}
-        Timestamp: ${timestamp()}
-        Device: ${Build.MANUFACTURER} ${Build.MODEL}
-        Android: ${Build.VERSION.RELEASE}
+        Thanks for helping us improve CanopyChat. The details below will help us understand and fix the problem.
 
-        What happened?
+        WHAT HAPPENED?
+        Please describe what went wrong.
 
 
-        What did you expect?
+        WHAT DID YOU EXPECT?
+        Please describe the behavior you expected.
 
 
-        Steps to reproduce:
+        STEPS TO REPRODUCE
         1.
         2.
         3.
+
+        Thank you for helping us make CanopyChat better.
+
+        TECHNICAL DETAILS FOR SUPPORT
+        Conversation: ${conversation?.title ?: "Not provided"}
+        Timestamp: ${timestamp()}
+        App Version: $appVersion
+        Device: ${Build.MODEL}
+        Android: ${Build.VERSION.RELEASE}
         """.trimIndent()
+
+    /** Port of CanopyFeedback.plainText on iOS — strips markdown emphasis/links/headers. */
+    private fun plainText(text: String): String =
+        text
+            .replace(Regex("\\*\\*(.*?)\\*\\*"), "$1")
+            .replace(Regex("__(.*?)__"), "$1")
+            .replace(Regex("`([^`]+)`"), "$1")
+            .replace(Regex("\\[([^\\]]+)\\]\\([^\\)]+\\)"), "$1")
+            .replace(Regex("^\\s{0,3}#{1,6}\\s*", RegexOption.IGNORE_CASE), "")
 
     private fun timestamp(): String =
         SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", Locale.US).format(Date())
+
+    /** Android counterpart of the iOS "CFBundleShortVersionString (CFBundleVersion)". */
+    private val appVersion: String
+        get() = "${com.nathanaelguitar.canopychat.BuildConfig.VERSION_NAME} " +
+            "(${com.nathanaelguitar.canopychat.BuildConfig.VERSION_CODE})"
 }
 
 /**
@@ -107,7 +175,7 @@ object CanopyNotifications {
         if (!hasPermission(context)) return
         ensureChannel(context)
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_dialog_email)
+            .setSmallIcon(com.nathanaelguitar.canopychat.R.drawable.ic_canopy_tree)
             .setContentTitle(title)
             .setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
@@ -186,8 +254,35 @@ class CanopyLocationService(private val context: Context) {
 
     private suspend fun currentPlace(): String? {
         if (!hasLocationPermission()) return null
-        val location = lastKnownLocation() ?: return null
+        // iOS asks CLLocationManager for a fresh fix (requestLocation); Android first
+        // tries requestSingleUpdate with a timeout and falls back to the last known fix.
+        val location = freshLocation() ?: lastKnownLocation() ?: return null
         return reverseGeocode(location) ?: String.format(Locale.US, "%.5f, %.5f", location.latitude, location.longitude)
+    }
+
+    @SuppressLint("MissingPermission")
+    private suspend fun freshLocation(): Location? {
+        if (!hasLocationPermission()) return null
+        val manager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        val provider = listOf(LocationManager.NETWORK_PROVIDER, LocationManager.GPS_PROVIDER)
+            .firstOrNull { runCatching { manager.isProviderEnabled(it) }.getOrDefault(false) }
+            ?: return null
+        return withTimeoutOrNull(FRESH_FIX_TIMEOUT_MS) {
+            suspendCancellableCoroutine<Location?> { continuation ->
+                val listener = LocationListener { location ->
+                    if (continuation.isActive) continuation.resume(location)
+                }
+                continuation.invokeOnCancellation {
+                    runCatching { manager.removeUpdates(listener) }
+                }
+                try {
+                    @Suppress("DEPRECATION")
+                    manager.requestSingleUpdate(provider, listener, Looper.getMainLooper())
+                } catch (_: Exception) {
+                    if (continuation.isActive) continuation.resume(null)
+                }
+            }
+        }
     }
 
     @SuppressLint("MissingPermission")
@@ -234,12 +329,19 @@ class CanopyLocationService(private val context: Context) {
     }
 
     companion object {
+        private const val FRESH_FIX_TIMEOUT_MS = 10_000L
+
+        /** Port of AetherLocationService.needsLocation on iOS, including Spanish phrases. */
         fun needsLocation(query: String): Boolean {
             val lc = query.lowercase()
-            return listOf("near me", "nearby", "around me", "my area", "my location", "current location")
-                .any { it in lc }
+            return listOf(
+                "near me", "nearby", "around me", "close to me", "around here",
+                "near here", "local", "my area", "my location", "current location",
+                "cerca de mí", "cerca de mi", "por aquí", "por aqui", "cerca"
+            ).any { it in lc }
         }
 
+        /** Port of AetherLocationService.replacingNearMe(in:with:) on iOS. */
         private fun replacingNearMe(query: String, place: String): String =
             query
                 .replace(Regex("(?i)\\bnear\\s+me\\b"), "near $place")
@@ -248,12 +350,16 @@ class CanopyLocationService(private val context: Context) {
                 .replace(Regex("(?i)\\bmy\\s+area\\b"), place)
                 .replace(Regex("(?i)\\bmy\\s+location\\b"), place)
                 .replace(Regex("(?i)\\bcurrent\\s+location\\b"), place)
+                .replace(Regex("(?i)\\bcerca\\s+de\\s+m[ií]\\b"), "cerca de $place")
+                .replace(Regex("(?i)\\bpor\\s+aqu[ií]\\b"), "cerca de $place")
 
+        /** Port of AetherLocationService.isLocalBusinessQuery on iOS. */
         private fun isLocalBusinessQuery(query: String): Boolean {
             val lc = query.lowercase()
             return listOf(
                 "food", "restaurant", "restaurants", "spots", "mexican", "taco", "tacos",
-                "coffee", "bar", "bars", "lunch", "dinner", "breakfast", "brunch"
+                "coffee", "bar", "bars", "lunch", "dinner", "breakfast", "brunch",
+                "mcdonald", "mcdonald's", "fast food", "burger", "burgers"
             ).any { it in lc }
         }
     }

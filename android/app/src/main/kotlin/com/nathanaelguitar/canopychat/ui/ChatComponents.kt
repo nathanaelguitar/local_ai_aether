@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -31,11 +32,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.EnergySavingsLeaf
 import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -46,14 +49,18 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.painterResource
@@ -69,74 +76,163 @@ fun ChatEmptyState(personaName: String, isDark: Boolean) {
     Column(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp, vertical = 80.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        Text("🌿", fontSize = 60.sp)
+        Box(
+            modifier = Modifier
+                .size(84.dp)
+                .clip(CircleShape)
+                .background(OakColors.forestMedium.copy(alpha = if (isDark) 0.2f else 0.12f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                Icons.Filled.EnergySavingsLeaf,
+                contentDescription = null,
+                tint = OakColors.forestMedium,
+                modifier = Modifier.size(34.dp)
+            )
+        }
         Text(
             "Begin your conversation with $personaName",
-            fontSize = 15.sp,
+            fontSize = 17.sp,
+            fontWeight = FontWeight.Medium,
+            fontFamily = FontFamily.Serif,
             textAlign = TextAlign.Center,
-            color = if (isDark) OakColors.warmGray500 else OakColors.warmGray600
+            color = if (isDark) OakColors.oakCream else OakColors.warmBlack
+        )
+        Text(
+            "Ask anything — answers run on your device.",
+            fontSize = 14.sp,
+            textAlign = TextAlign.Center,
+            color = if (isDark) OakColors.warmGray400 else OakColors.warmGray500
         )
     }
 }
 
 /**
- * Port of TypingIndicator in iphone/AetherChat/ChatView.swift — three dots that lift
- * out of phase, with the current generation status above them.
+ * Port of TypingIndicator in iphone/AetherChat/ChatView.swift — a breathing amber
+ * radial dot, shimmer gradient sweeping the status text, and five composing phrases
+ * that rotate every six seconds.
  */
 @Composable
 fun TypingIndicator(message: String?, isDark: Boolean) {
     val transition = rememberInfiniteTransition(label = "typing")
-    val time by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = (2 * Math.PI).toFloat(),
+    val breath by transition.animateFloat(
+        initialValue = -1f,
+        targetValue = 1f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1_208, easing = LinearEasing),
+            animation = tween(durationMillis = 1_200),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "breath"
+    )
+    val sweep by transition.animateFloat(
+        initialValue = -0.4f,
+        targetValue = 1.4f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 3_270, easing = LinearEasing),
             repeatMode = RepeatMode.Restart
         ),
-        label = "phase"
+        label = "sweep"
+    )
+    // Rotating composing phrases, one every 6 s, matching iOS's TimelineView cadence.
+    var phraseIndex by remember { mutableStateOf(0) }
+    val showRotatingPhrase = message.isNullOrEmpty() || message == "Composing a response"
+    LaunchedEffect(showRotatingPhrase) {
+        if (!showRotatingPhrase) return@LaunchedEffect
+        while (true) {
+            kotlinx.coroutines.delay(6_000)
+            phraseIndex = (phraseIndex + 1).coerceAtMost(composingPhrases.lastIndex)
+        }
+    }
+
+    val base = if (isDark) OakColors.warmGray400 else OakColors.warmGray500
+    val highlight = if (isDark) OakColors.oakPale else OakColors.oakMedium
+    val shimmerBrush = Brush.linearGradient(
+        (0f to base),
+        ((sweep - 0.25f).coerceIn(0f, 1f) to base),
+        (sweep.coerceIn(0f, 1f) to highlight),
+        ((sweep + 0.25f).coerceIn(0f, 1f) to base),
+        (1f to base)
     )
 
-    Row(modifier = Modifier.fillMaxWidth()) {
-        Column(
+    Row(modifier = Modifier.fillMaxWidth().padding(start = 2.dp)) {
+        Row(
             modifier = Modifier
-                .clip(RoundedCornerShape(18.dp))
+                .clip(RoundedCornerShape(22.dp))
                 .background(if (isDark) OakColors.warmGray800 else Color.White)
-                .padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalArrangement = Arrangement.spacedBy(7.dp)
+                .border(
+                    1.dp,
+                    Brush.linearGradient(
+                        if (isDark) {
+                            listOf(Color.White.copy(alpha = 0.12f), Color.White.copy(alpha = 0.03f))
+                        } else {
+                            listOf(OakColors.oakPale.copy(alpha = 0.8f), OakColors.oakPale.copy(alpha = 0.3f))
+                        }
+                    ),
+                    RoundedCornerShape(22.dp)
+                )
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            if (!message.isNullOrEmpty()) {
-                Text(
-                    message,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = if (isDark) OakColors.warmGray200 else OakColors.warmGray600
+            Box(contentAlignment = Alignment.Center, modifier = Modifier.size(18.dp)) {
+                Box(
+                    modifier = Modifier
+                        .size(26.dp)
+                        .scale(1f + 0.22f * breath)
+                        .background(
+                            Brush.radialGradient(
+                                listOf(OakColors.amber.copy(alpha = 0.5f), Color.Transparent)
+                            ),
+                            CircleShape
+                        )
+                )
+                Box(
+                    modifier = Modifier
+                        .size(9.dp)
+                        .scale(1f + 0.14f * breath)
+                        .clip(CircleShape)
+                        .background(
+                            Brush.linearGradient(listOf(OakColors.amber, OakColors.copper))
+                        )
                 )
             }
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.height(16.dp)
-            ) {
-                repeat(3) { index ->
-                    val phase = time - index * 0.62f
-                    val lift = max(0.0, sin(phase.toDouble()))
-                    Box(
-                        modifier = Modifier
-                            .padding(bottom = (lift * 7).dp)
-                            .size(8.dp)
-                            .scale((1 + lift * 0.22).toFloat())
-                            .clip(CircleShape)
-                            .background(
-                                (if (isDark) OakColors.warmGray400 else OakColors.warmGray500)
-                                    .copy(alpha = (0.62 + lift * 0.38).toFloat())
-                            )
-                    )
-                }
-            }
+            Text(
+                if (showRotatingPhrase) composingPhrases[phraseIndex] else message.orEmpty(),
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+                style = androidx.compose.ui.text.TextStyle(brush = shimmerBrush)
+            )
         }
         Spacer(Modifier.weight(1f))
+    }
+}
+
+private val composingPhrases = listOf(
+    "Composing a response",
+    "Gathering thoughts",
+    "Choosing the right words",
+    "Polishing the reply",
+    "Still composing, thanks for waiting"
+)
+
+/** Port of StreamingBubble in iphone/AetherChat/ChatView.swift — live tokens + amber cursor. */
+@Composable
+fun StreamingBubble(text: String, isDark: Boolean, fontScale: Double) {
+    val content = buildAnnotatedString {
+        append(text)
+        withStyle(SpanStyle(color = OakColors.amber, fontSize = (11 * fontScale).sp)) {
+            append(" ●")
+        }
+    }
+    Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp)) {
+        Text(
+            text = content,
+            fontSize = (15 * fontScale).sp,
+            color = if (isDark) OakColors.warmGray100 else OakColors.warmBlack,
+            modifier = Modifier.padding(vertical = 4.dp)
+        )
     }
 }
 
@@ -147,26 +243,6 @@ fun TypingIndicator(message: String?, isDark: Boolean) {
  */
 @Composable
 fun ModelLoadingOverlay(message: String, isDark: Boolean) {
-    val transition = rememberInfiniteTransition(label = "loading")
-    val rotation by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1_150, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "rotation"
-    )
-    val pulse by transition.animateFloat(
-        initialValue = 0.94f,
-        targetValue = 1.08f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 900),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "pulse"
-    )
-
     val scrimInteraction = remember { MutableInteractionSource() }
 
     Box(
@@ -189,41 +265,7 @@ fun ModelLoadingOverlay(message: String, isDark: Boolean) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
-            Box(contentAlignment = Alignment.Center) {
-                androidx.compose.foundation.Canvas(modifier = Modifier.size(116.dp)) {
-                    val stroke = 14.dp.toPx()
-                    drawArc(
-                        color = OakColors.oakPale.copy(alpha = 0.28f),
-                        startAngle = 0f,
-                        sweepAngle = 360f,
-                        useCenter = false,
-                        style = Stroke(width = stroke)
-                    )
-                    rotate(rotation) {
-                        drawArc(
-                            brush = Brush.sweepGradient(
-                                listOf(
-                                    OakColors.oakMedium,
-                                    OakColors.copper,
-                                    OakColors.amber,
-                                    OakColors.oakMedium
-                                )
-                            ),
-                            // iOS trims the ring from 0.08 to 0.72 of a full turn.
-                            startAngle = 0.08f * 360f,
-                            sweepAngle = (0.72f - 0.08f) * 360f,
-                            useCenter = false,
-                            style = Stroke(width = stroke, cap = StrokeCap.Round)
-                        )
-                    }
-                }
-                Icon(
-                    painterResource(R.drawable.ic_canopy_tree),
-                    contentDescription = null,
-                    tint = OakColors.oakMedium,
-                    modifier = Modifier.size(40.dp).scale(pulse)
-                )
-            }
+            WoodlandWalkScene(isDark)
 
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -250,6 +292,156 @@ fun ModelLoadingOverlay(message: String, isDark: Boolean) {
                     modifier = Modifier.padding(top = 2.dp)
                 )
             }
+        }
+    }
+}
+
+/**
+ * Port of WoodlandWalkScene in iphone/AetherChat/ChatView.swift — a little woodland
+ * sprout endlessly walking toward a tree while the model loads.
+ */
+@Composable
+private fun WoodlandWalkScene(isDark: Boolean) {
+    val transition = rememberInfiniteTransition(label = "woodland")
+    val cycle by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 7_000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "cycle"
+    )
+    val legPhase by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = (2 * Math.PI).toFloat(),
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 700, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "legs"
+    )
+    val swayPhase by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = (2 * Math.PI).toFloat(),
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 5_700, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "sway"
+    )
+
+    val walkPortion = 0.78f
+    val startX = -104f
+    val treeX = 88f
+    val walking = cycle < walkPortion
+    val walkProgress = (cycle / walkPortion).coerceAtMost(1f)
+    val walkerX = startX + (treeX - 34 - startX) * walkProgress
+    val celebrateT = if (walking) 0f else (cycle - walkPortion) / (1 - walkPortion)
+
+    Box(modifier = Modifier.size(240.dp, 96.dp), contentAlignment = Alignment.Center) {
+        // Ground line.
+        Box(
+            modifier = Modifier
+                .offset(y = 40.dp)
+                .size(236.dp, 3.dp)
+                .clip(CircleShape)
+                .background(OakColors.oakPale.copy(alpha = if (isDark) 0.35f else 0.6f))
+        )
+
+        // Swaying tree.
+        Icon(
+            painterResource(R.drawable.ic_canopy_tree),
+            contentDescription = null,
+            tint = OakColors.forestMedium,
+            modifier = Modifier
+                .offset(x = treeX.dp, y = 18.dp)
+                .size(46.dp)
+                .graphicsLayer(
+                    rotationZ = sin(swayPhase.toDouble()).toFloat() * 1.6f,
+                    transformOrigin = TransformOrigin(0.5f, 1f)
+                )
+        )
+
+        // Celebration leaf that floats up when the sprout arrives.
+        if (!walking) {
+            Icon(
+                Icons.Filled.EnergySavingsLeaf,
+                contentDescription = null,
+                tint = OakColors.forestMedium.copy(alpha = 0.85f),
+                modifier = Modifier
+                    .offset(
+                        x = (treeX - 18 + sin(celebrateT * Math.PI * 2).toFloat() * 8).dp,
+                        y = (10 - celebrateT * 34).dp
+                    )
+                    .size(11.dp)
+                    .graphicsLayer(alpha = sin(celebrateT * Math.PI).toFloat().coerceIn(0f, 1f))
+            )
+        }
+
+        // Walker.
+        val bobPhase = legPhase * 7f / 9f
+        val walkerY = 26f + if (walking) {
+            -kotlin.math.abs(sin(bobPhase.toDouble())).toFloat() * 3
+        } else {
+            -kotlin.math.abs(sin(celebrateT * Math.PI * 2)).toFloat() * 8
+        }
+        val legSwing = if (walking) sin(legPhase.toDouble()).toFloat() * 24 else 0f
+        Box(modifier = Modifier.offset(x = walkerX.dp, y = walkerY.dp)) {
+            // Legs.
+            Box(
+                modifier = Modifier
+                    .offset(x = (-3).dp, y = 12.dp)
+                    .size(3.5.dp, 10.dp)
+                    .graphicsLayer(
+                        rotationZ = legSwing,
+                        transformOrigin = TransformOrigin(0.5f, 0f)
+                    )
+                    .clip(CircleShape)
+                    .background(OakColors.oakMedium)
+            )
+            Box(
+                modifier = Modifier
+                    .offset(x = 3.dp, y = 12.dp)
+                    .size(3.5.dp, 10.dp)
+                    .graphicsLayer(
+                        rotationZ = -legSwing,
+                        transformOrigin = TransformOrigin(0.5f, 0f)
+                    )
+                    .clip(CircleShape)
+                    .background(OakColors.oakMedium)
+            )
+            // Body.
+            Box(
+                modifier = Modifier
+                    .size(22.dp)
+                    .clip(CircleShape)
+                    .background(Brush.linearGradient(listOf(OakColors.amber, OakColors.copper)))
+            )
+            // Eye.
+            Box(
+                modifier = Modifier
+                    .offset(x = 5.dp, y = (-3).dp)
+                    .size(3.5.dp)
+                    .clip(CircleShape)
+                    .background(Color.White)
+            )
+            // Leaf hat.
+            Icon(
+                Icons.Filled.EnergySavingsLeaf,
+                contentDescription = null,
+                tint = OakColors.forestMedium,
+                modifier = Modifier
+                    .offset(x = 3.dp, y = (-13).dp)
+                    .size(9.dp)
+                    .graphicsLayer(
+                        rotationZ = -35f + if (walking) {
+                            sin(bobPhase.toDouble()).toFloat() * 6
+                        } else {
+                            celebrateT * 20
+                        }
+                    )
+            )
         }
     }
 }
@@ -381,7 +573,7 @@ fun PromptEditorSheet(
                 horizontalArrangement = Arrangement.End
             ) {
                 TextButton(onClick = onDismiss) {
-                    Text("Cancel", color = OakColors.warmGray500)
+                    Text("Cancel", color = oakSubtitle())
                 }
                 TextButton(onClick = { onSubmit(draft) }) {
                     Text("Save", color = OakColors.oakMedium, fontWeight = FontWeight.SemiBold)

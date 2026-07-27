@@ -7,7 +7,15 @@ plugins {
 android {
     namespace = "com.nathanaelguitar.canopychat"
     compileSdk = 35
-    ndkVersion = "26.3.11579264"
+
+    // The official NDK ships x86_64 host binaries only; aarch64 build hosts (or CI
+    // without an NDK) can still produce an APK with -Pcanopy.skipNative. The app then
+    // reports on-device inference as unavailable and offers the Backend provider,
+    // which is the same graceful path LlamaCppEngine already uses for load failures.
+    val withNative = !project.hasProperty("canopy.skipNative")
+    if (withNative) {
+        ndkVersion = "26.3.11579264"
+    }
 
     defaultConfig {
         applicationId = "com.nathanaelguitar.canopychat"
@@ -17,33 +25,50 @@ android {
         versionName = "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        ndk {
-            abiFilters += listOf("arm64-v8a", "x86_64")
-        }
+        if (withNative) {
+            ndk {
+                abiFilters += listOf("arm64-v8a", "x86_64")
+            }
 
-        externalNativeBuild {
-            cmake {
-                arguments += listOf(
-                    "-DCMAKE_BUILD_TYPE=Release",
-                    "-DBUILD_SHARED_LIBS=ON",
-                    "-DLLAMA_BUILD_APP=OFF",
-                    "-DLLAMA_BUILD_COMMON=OFF",
-                    "-DLLAMA_BUILD_EXAMPLES=OFF",
-                    "-DLLAMA_BUILD_TESTS=OFF",
-                    "-DLLAMA_OPENSSL=OFF",
-                    "-DGGML_NATIVE=OFF",
-                    "-DGGML_OPENMP=OFF",
-                    "-DGGML_LLAMAFILE=OFF",
-                    "-DGGML_BACKEND_DL=OFF",
-                    // Android 15+ devices can use 16 KB memory pages, and Google Play
-                    // requires 16 KB support for apps targeting Android 15+. NDK r26
-                    // still links with 4 KB LOAD alignment, so ask for it explicitly.
-                    // (NDK r27+ does this by default and the flag stays harmless.)
-                    "-DCMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=16384",
-                    "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON"
-                )
+            externalNativeBuild {
+                cmake {
+                    arguments += listOf(
+                        "-DCMAKE_BUILD_TYPE=Release",
+                        "-DBUILD_SHARED_LIBS=ON",
+                        "-DLLAMA_BUILD_APP=OFF",
+                        "-DLLAMA_BUILD_COMMON=OFF",
+                        "-DLLAMA_BUILD_EXAMPLES=OFF",
+                        "-DLLAMA_BUILD_TESTS=OFF",
+                        "-DLLAMA_OPENSSL=OFF",
+                        "-DGGML_NATIVE=OFF",
+                        "-DGGML_OPENMP=OFF",
+                        "-DGGML_LLAMAFILE=OFF",
+                        "-DGGML_BACKEND_DL=OFF",
+                        // Android 15+ devices can use 16 KB memory pages, and Google Play
+                        // requires 16 KB support for apps targeting Android 15+. NDK r26
+                        // still links with 4 KB LOAD alignment, so ask for it explicitly.
+                        // (NDK r27+ does this by default and the flag stays harmless.)
+                        "-DCMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=16384",
+                        "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON"
+                    )
+                }
             }
         }
+
+        // Private model delivery endpoints, the Android counterpart of the
+        // AETHER_MODEL_* keys in iphone/AetherChat/Info.plist. Production values are
+        // the defaults; local builds can override them in gradle.properties.
+        val manifestEndpoint = findProperty("CANOPY_MODEL_MANIFEST_ENDPOINT") as String?
+            ?: "https://model-api.canopychat.app/v1/model-manifest"
+        val registrationEndpoint = findProperty("CANOPY_MODEL_REGISTRATION_ENDPOINT") as String?
+            ?: "https://model-api.canopychat.app/v1/tokens"
+        val buildChannel = findProperty("CANOPY_BUILD_CHANNEL") as String? ?: "production"
+        val telemetryEndpoint = findProperty("CANOPY_BETA_TELEMETRY_ENDPOINT") as String?
+            ?: "https://model-api.canopychat.app/v1/contributor/batches"
+        buildConfigField("String", "MODEL_MANIFEST_ENDPOINT", "\"$manifestEndpoint\"")
+        buildConfigField("String", "MODEL_REGISTRATION_ENDPOINT", "\"$registrationEndpoint\"")
+        buildConfigField("String", "BUILD_CHANNEL", "\"$buildChannel\"")
+        buildConfigField("String", "BETA_TELEMETRY_ENDPOINT", "\"$telemetryEndpoint\"")
     }
 
     packaging {
@@ -66,10 +91,12 @@ android {
         buildConfig = true
     }
 
-    externalNativeBuild {
-        cmake {
-            path = file("src/main/cpp/CMakeLists.txt")
-            version = "3.22.1"
+    if (withNative) {
+        externalNativeBuild {
+            cmake {
+                path = file("src/main/cpp/CMakeLists.txt")
+                version = "3.22.1"
+            }
         }
     }
 
@@ -101,10 +128,15 @@ dependencies {
     implementation("androidx.graphics:graphics-path:1.1.0")
     implementation("com.android.billingclient:billing-ktx:6.2.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    // Android Keystore-backed storage for the opaque model-delivery bearer token,
+    // the counterpart of the iOS Keychain wrapper in AetherModelDelivery.swift.
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
     // PDF text extraction, the Android stand-in for PDFKit on iOS. Apache 2.0 —
     // iText would force AGPL or a commercial licence on a paid app.
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
     testImplementation("junit:junit:4.13.2")
+    // Real org.json classes for local unit tests; the android.jar stubs throw.
+    testImplementation("org.json:json:20240303")
     androidTestImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test:runner:1.6.2")
     androidTestImplementation("androidx.test:core-ktx:1.6.1")
