@@ -66,8 +66,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.res.painterResource
-import com.nathanaelguitar.canopychat.R
 import androidx.compose.ui.window.Dialog
 import com.nathanaelguitar.canopychat.core.ChatAttachment
 import kotlin.math.max
@@ -352,14 +350,13 @@ private fun WoodlandWalkScene(isDark: Boolean) {
                 .background(OakColors.oakPale.copy(alpha = if (isDark) 0.35f else 0.6f))
         )
 
-        // Swaying tree.
-        Icon(
-            painterResource(R.drawable.ic_canopy_tree),
-            contentDescription = null,
-            tint = OakColors.forestMedium,
+        // Swaying woodland tree. This intentionally has its own silhouette:
+        // ic_canopy_tree is the app-logo oak, while iOS uses SF Symbols' broader
+        // tree.fill with a visible branching trunk in this animation.
+        WoodlandTree(
             modifier = Modifier
                 .offset(x = treeX.dp, y = 18.dp)
-                .size(46.dp)
+                .size(50.dp)
                 .graphicsLayer(
                     rotationZ = sin(swayPhase.toDouble()).toFloat() * 1.6f,
                     transformOrigin = TransformOrigin(0.5f, 1f)
@@ -450,6 +447,58 @@ private fun WoodlandWalkScene(isDark: Boolean) {
                     )
             )
         }
+    }
+}
+
+@Composable
+private fun WoodlandTree(modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier) {
+        val canopy = Brush.verticalGradient(
+            colors = listOf(
+                OakColors.forestMedium,
+                OakColors.forestMedium.copy(alpha = 0.78f)
+            ),
+            startY = 0f,
+            endY = size.height
+        )
+
+        // A broad, softly lobed crown like iOS's tree.fill.
+        drawCircle(canopy, radius = size.width * 0.25f, center = androidx.compose.ui.geometry.Offset(size.width * 0.50f, size.height * 0.28f))
+        drawCircle(canopy, radius = size.width * 0.22f, center = androidx.compose.ui.geometry.Offset(size.width * 0.30f, size.height * 0.40f))
+        drawCircle(canopy, radius = size.width * 0.22f, center = androidx.compose.ui.geometry.Offset(size.width * 0.70f, size.height * 0.40f))
+        drawCircle(canopy, radius = size.width * 0.20f, center = androidx.compose.ui.geometry.Offset(size.width * 0.48f, size.height * 0.47f))
+
+        // The branching trunk is deliberately visible through the lower canopy.
+        val trunk = Path().apply {
+            moveTo(size.width * 0.42f, size.height * 0.94f)
+            cubicTo(
+                size.width * 0.45f,
+                size.height * 0.77f,
+                size.width * 0.45f,
+                size.height * 0.67f,
+                size.width * 0.42f,
+                size.height * 0.55f
+            )
+            lineTo(size.width * 0.25f, size.height * 0.41f)
+            lineTo(size.width * 0.31f, size.height * 0.37f)
+            lineTo(size.width * 0.46f, size.height * 0.51f)
+            lineTo(size.width * 0.48f, size.height * 0.32f)
+            lineTo(size.width * 0.55f, size.height * 0.32f)
+            lineTo(size.width * 0.54f, size.height * 0.53f)
+            lineTo(size.width * 0.71f, size.height * 0.40f)
+            lineTo(size.width * 0.77f, size.height * 0.45f)
+            lineTo(size.width * 0.57f, size.height * 0.62f)
+            cubicTo(
+                size.width * 0.55f,
+                size.height * 0.73f,
+                size.width * 0.57f,
+                size.height * 0.84f,
+                size.width * 0.61f,
+                size.height * 0.94f
+            )
+            close()
+        }
+        drawPath(trunk, OakColors.forestMedium.copy(alpha = 0.92f))
     }
 }
 

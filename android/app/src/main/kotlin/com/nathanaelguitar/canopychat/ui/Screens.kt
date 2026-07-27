@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -79,7 +80,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
@@ -1538,10 +1539,12 @@ fun ChatScreen(state: AppState, conversationId: UUID, onBack: () -> Unit, onNewC
                             )
                         } else {
                             Icon(
-                                Icons.AutoMirrored.Filled.Send,
+                                Icons.Filled.ArrowUpward,
                                 contentDescription = "Send",
                                 tint = if (canSend) Color.White else (if (isDark) OakColors.warmGray400 else OakColors.warmGray500),
-                                modifier = Modifier.size(17.dp)
+                                modifier = Modifier
+                                    .offset(y = (-1).dp)
+                                    .size(18.dp)
                             )
                         }
                     }
