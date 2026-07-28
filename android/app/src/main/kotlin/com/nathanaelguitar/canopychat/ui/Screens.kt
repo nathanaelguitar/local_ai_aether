@@ -16,14 +16,18 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -78,18 +82,20 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AddCircleOutline
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.EnergySavingsLeaf
 import androidx.compose.material.icons.filled.Feedback
 import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.IosShare
@@ -123,6 +129,8 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.focus.FocusManager
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.res.painterResource
 import com.nathanaelguitar.canopychat.R
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -234,7 +242,7 @@ fun WelcomeScreen(isDark: Boolean, onEnter: () -> Unit) {
                     isDark
                 )
                 FeatureRow(
-                    Icons.Filled.EnergySavingsLeaf,
+                    painterResource(R.drawable.ic_leaf_fill),
                     OakColors.copper,
                     "Eco-Friendly Intelligence",
                     "Use the model already in your hand instead of a data center.",
@@ -284,7 +292,12 @@ private fun visibleAlpha(visible: Boolean, delayMillis: Int, durationMillis: Int
 
 /** Port of WelcomeFeatureRow in iphone/AetherChat/WelcomeView.swift. */
 @Composable
-private fun FeatureRow(icon: ImageVector, tint: Color, title: String, subtitle: String, isDark: Boolean) {
+private fun FeatureRow(icon: ImageVector, tint: Color, title: String, subtitle: String, isDark: Boolean) =
+    FeatureRow(rememberVectorPainter(icon), tint, title, subtitle, isDark)
+
+/** Painter overload so the traced leaf drawable can sit alongside Material vectors. */
+@Composable
+private fun FeatureRow(icon: Painter, tint: Color, title: String, subtitle: String, isDark: Boolean) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(14.dp)
@@ -534,63 +547,136 @@ private fun NewChatDialog(
     val workspaces = remember(customWorkspaces) { state.availableWorkspaces }
     val personas = remember(customPersonas) { state.availablePersonas }
 
-    AlertDialog(
+    // iOS presents this as a full-screen sheet: NavigationStack + grouped Form with
+    // "Title" / "Workspace" / "Assistant" sections and Cancel/Create in the toolbar.
+    // A Material AlertDialog looked nothing like it, so this rebuilds that shape.
+    Dialog(
         onDismissRequest = onDismiss,
-        title = { Text("New Conversation") },
-        text = {
-            Column(
-                modifier = Modifier.verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+        // decorFitsSystemWindows=false lets window insets reach the content; without it the
+        // dialog swallows them and the last section hides under the navigation bar.
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(groupedBackground(isDark))
+                .safeDrawingPadding()
+        ) {
+            // Inline navigation bar.
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(navBarSurface(isDark))
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                OutlinedTextField(
-                    value = title,
-                    onValueChange = { title = it },
-                    label = { Text("What's this about?") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
+                Text(
+                    "Cancel",
+                    fontSize = 16.sp,
+                    color = OakColors.oakMedium,
+                    modifier = Modifier.clickable(onClick = onDismiss)
                 )
+                Text(
+                    "New Conversation",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    textAlign = TextAlign.Center,
+                    color = if (isDark) OakColors.oakCream else OakColors.warmBlack,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    "Create",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = OakColors.oakMedium,
+                    modifier = Modifier.clickable { onCreate(workspace, persona, title) }
+                )
+            }
 
-                Text("Workspace", fontSize = 12.sp, color = oakSubtitle())
-                workspaces.forEach { option ->
-                    WorkspacePickerRow(
-                        workspace = option,
-                        isSelected = workspace.id == option.id,
-                        onSelect = { workspace = option },
-                        onDelete = {
-                            state.deleteCustomWorkspace(option)
-                            if (workspace.id == option.id) workspace = Workspace.PERSONAL
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState())
+                    // Dialog windows report zero insets to their content on this device, so
+                    // the trailing gap is fixed and sized to clear a 3-button nav bar.
+                    .padding(bottom = 96.dp)
+            ) {
+                FormSection("TITLE", isDark) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(rowSurface(isDark))
+                            .padding(horizontal = 14.dp, vertical = 4.dp)
+                    ) {
+                        if (title.isEmpty()) {
+                            Text(
+                                "What's this about?",
+                                fontSize = 15.sp,
+                                color = if (isDark) OakColors.warmGray500 else OakColors.warmGray400,
+                                modifier = Modifier.align(Alignment.CenterStart)
+                            )
                         }
-                    )
-                }
-                TextButton(onClick = { workspaceName = ""; showingCreateWorkspace = true }) {
-                    Text("+ Add Workspace", color = OakColors.oakMedium, fontSize = 13.sp)
+                        BasicTextField(
+                            value = title,
+                            onValueChange = { title = it },
+                            singleLine = true,
+                            textStyle = androidx.compose.ui.text.TextStyle(
+                                fontSize = 15.sp,
+                                color = if (isDark) OakColors.warmGray100 else OakColors.warmBlack
+                            ),
+                            cursorBrush = SolidColor(OakColors.oakMedium),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 12.dp)
+                        )
+                    }
                 }
 
-                Text("Assistant", fontSize = 12.sp, color = oakSubtitle())
-                personas.forEach { option ->
-                    AssistantPickerRow(
-                        persona = option,
-                        isSelected = persona.id == option.id,
-                        onSelect = { persona = option },
-                        onEdit = { editingAssistant = option },
-                        onDelete = {
-                            state.deleteCustomPersona(option)
-                            if (persona.id == option.id) persona = AssistantPersona.DEFAULT
-                        }
-                    )
+                FormSection("WORKSPACE", isDark) {
+                    workspaces.forEachIndexed { index, option ->
+                        WorkspacePickerRow(
+                            workspace = option,
+                            isSelected = workspace.id == option.id,
+                            isDark = isDark,
+                            onSelect = { workspace = option },
+                            onDelete = {
+                                state.deleteCustomWorkspace(option)
+                                if (workspace.id == option.id) workspace = Workspace.PERSONAL
+                            }
+                        )
+                        if (index != workspaces.lastIndex) FormDivider(isDark)
+                    }
+                    FormDivider(isDark)
+                    FormActionRow("Add Workspace", isDark) {
+                        workspaceName = ""
+                        showingCreateWorkspace = true
+                    }
                 }
-                TextButton(onClick = { showingCreateAssistant = true }) {
-                    Text("+ Create Assistant", color = OakColors.oakMedium, fontSize = 13.sp)
+
+                FormSection("ASSISTANT", isDark) {
+                    personas.forEachIndexed { index, option ->
+                        AssistantPickerRow(
+                            persona = option,
+                            isSelected = persona.id == option.id,
+                            isDark = isDark,
+                            onSelect = { persona = option },
+                            onEdit = { editingAssistant = option },
+                            onDelete = {
+                                state.deleteCustomPersona(option)
+                                if (persona.id == option.id) persona = AssistantPersona.DEFAULT
+                            }
+                        )
+                        if (index != personas.lastIndex) FormDivider(isDark)
+                    }
+                    FormDivider(isDark)
+                    FormActionRow("Create Assistant", isDark) { showingCreateAssistant = true }
                 }
             }
-        },
-        confirmButton = {
-            TextButton(onClick = { onCreate(workspace, persona, title) }) {
-                Text("Create", color = OakColors.oakMedium, fontWeight = FontWeight.SemiBold)
-            }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
-    )
+        }
+    }
 
     if (showingCreateWorkspace) {
         AlertDialog(
@@ -721,33 +807,54 @@ private fun RenameConversationDialog(
 private fun AssistantPickerRow(
     persona: AssistantPersona,
     isSelected: Boolean,
+    isDark: Boolean,
     onSelect: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onSelect)
-            .padding(vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(persona.name, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-            Text(persona.description, fontSize = 12.sp, color = oakSubtitle())
-        }
-        if (isSelected) {
-            Icon(
-                Icons.Filled.Check,
-                contentDescription = "Selected",
-                tint = OakColors.oakMedium,
-                modifier = Modifier.size(18.dp)
+    // Only custom assistants are editable/deletable, matching iOS's swipeActions guard.
+    SwipeActionsRow(
+        actions = if (!persona.id.startsWith("custom-")) {
+            emptyList()
+        } else {
+            listOf(
+                SwipeAction(
+                    label = "Delete",
+                    icon = Icons.Filled.Delete,
+                    background = OakColors.error,
+                    isDestructive = true,
+                    onClick = onDelete
+                ),
+                SwipeAction(
+                    label = "Edit",
+                    icon = Icons.Filled.Edit,
+                    background = OakColors.oakMedium,
+                    onClick = onEdit
+                )
             )
-        }
-        // iOS exposes edit/delete via swipe actions on custom assistants only.
-        if (persona.id.startsWith("custom-")) {
-            TextButton(onClick = onEdit) { Text("Edit", color = OakColors.oakMedium, fontSize = 12.sp) }
-            TextButton(onClick = onDelete) { Text("Delete", color = OakColors.error, fontSize = 12.sp) }
+        },
+        shape = RoundedCornerShape(10.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(rowSurface(isDark))
+                .clickable(onClick = onSelect)
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(persona.name, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                Text(persona.description, fontSize = 12.sp, color = oakSubtitle())
+            }
+            if (isSelected) {
+                Icon(
+                    Icons.Filled.Check,
+                    contentDescription = "Selected",
+                    tint = OakColors.oakMedium,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
         }
     }
 }
@@ -886,6 +993,25 @@ private fun ConversationRow(
     // iOS uses a long-press contextMenu; Compose's equivalent is combinedClickable + menu.
     var showMenu by remember { mutableStateOf(false) }
 
+    // iOS exposes these via .swipeActions(edge: .trailing); the long-press menu stays
+    // as the accessible equivalent.
+    SwipeActionsRow(
+        actions = listOf(
+            SwipeAction(
+                label = "Delete",
+                icon = Icons.Filled.Delete,
+                background = OakColors.error,
+                isDestructive = true,
+                onClick = onDelete
+            ),
+            SwipeAction(
+                label = if (conversation.isPinned) "Unpin" else "Pin",
+                icon = if (conversation.isPinned) Icons.Filled.PushPin else Icons.Filled.PushPin,
+                background = OakColors.amber,
+                onClick = onPin
+            )
+        )
+    ) {
     Box {
         Row(
             modifier = Modifier
@@ -978,6 +1104,7 @@ private fun ConversationRow(
             )
         }
     }
+    }
 }
 
 /** Port of ConversationRow.relativeDate in iphone/AetherChat/ConversationListView.swift. */
@@ -1008,7 +1135,7 @@ private fun EmptyGrove(isDark: Boolean, onCreate: () -> Unit) {
             contentAlignment = Alignment.Center
         ) {
             Icon(
-                Icons.Filled.EnergySavingsLeaf,
+                painterResource(R.drawable.ic_leaf_fill),
                 contentDescription = null,
                 tint = OakColors.forestMedium,
                 modifier = Modifier.size(34.dp)
@@ -2048,6 +2175,7 @@ fun SettingsScreen(
                                 WorkspacePickerRow(
                                     workspace = workspace,
                                     isSelected = defaultWorkspaceId == workspace.id,
+                                    isDark = isDark,
                                     onSelect = { state.setDefaultWorkspace(workspace) },
                                     onDelete = { state.deleteCustomWorkspace(workspace) }
                                 )
@@ -2360,36 +2488,50 @@ private fun FontSizeSettingsRow(fontScale: Double, onChange: (Double) -> Unit) {
 private fun WorkspacePickerRow(
     workspace: Workspace,
     isSelected: Boolean,
+    isDark: Boolean,
     onSelect: () -> Unit,
     onDelete: () -> Unit
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onSelect)
-            .padding(vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        Box(
-            modifier = Modifier
-                .size(10.dp)
-                .clip(CircleShape)
-                .background(Color(android.graphics.Color.parseColor("#${workspace.colorHex}")))
-        )
-        Text(workspace.name, fontSize = 15.sp, modifier = Modifier.weight(1f))
-        if (isSelected) {
-            Icon(
-                Icons.Filled.Check,
-                contentDescription = "Selected",
-                tint = Color(android.graphics.Color.parseColor("#${workspace.colorHex}")),
-                modifier = Modifier.size(18.dp)
+    // Built-ins can't be deleted, so they get no swipe actions at all — same as iOS.
+    SwipeActionsRow(
+        actions = if (workspace.isBuiltIn) {
+            emptyList()
+        } else {
+            listOf(
+                SwipeAction(
+                    label = "Delete",
+                    icon = Icons.Filled.Delete,
+                    background = OakColors.error,
+                    isDestructive = true,
+                    onClick = onDelete
+                )
             )
-        }
-        // iOS exposes delete via swipe action; Compose lists use an explicit affordance.
-        if (!workspace.isBuiltIn) {
-            TextButton(onClick = onDelete) {
-                Text("Delete", color = OakColors.error, fontSize = 12.sp)
+        },
+        shape = RoundedCornerShape(10.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(rowSurface(isDark))
+                .clickable(onClick = onSelect)
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(10.dp)
+                    .clip(CircleShape)
+                    .background(Color(android.graphics.Color.parseColor("#${workspace.colorHex}")))
+            )
+            Text(workspace.name, fontSize = 15.sp, modifier = Modifier.weight(1f))
+            if (isSelected) {
+                Icon(
+                    Icons.Filled.Check,
+                    contentDescription = "Selected",
+                    tint = Color(android.graphics.Color.parseColor("#${workspace.colorHex}")),
+                    modifier = Modifier.size(18.dp)
+                )
             }
         }
     }
@@ -3045,3 +3187,63 @@ private fun SettingsCard(isDark: Boolean, content: @Composable () -> Unit) {
         content()
     }
 }
+
+/** iOS `Form` grouping: an uppercase caption above a rounded card of rows. */
+@Composable
+private fun FormSection(title: String, isDark: Boolean, content: @Composable ColumnScope.() -> Unit) {
+    Column(modifier = Modifier.padding(top = 22.dp)) {
+        Text(
+            title,
+            fontSize = 12.sp,
+            letterSpacing = 0.6.sp,
+            color = if (isDark) OakColors.warmGray500 else OakColors.warmGray600,
+            modifier = Modifier.padding(start = 30.dp, bottom = 7.dp)
+        )
+        Column(
+            modifier = Modifier
+                .padding(horizontal = 16.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(rowSurface(isDark)),
+            content = content
+        )
+    }
+}
+
+@Composable
+private fun FormDivider(isDark: Boolean) {
+    HorizontalDivider(
+        modifier = Modifier.padding(start = 14.dp),
+        color = if (isDark) Color.White.copy(alpha = 0.07f) else OakColors.warmGray200.copy(alpha = 0.7f)
+    )
+}
+
+@Composable
+private fun FormActionRow(label: String, isDark: Boolean, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Icon(
+            Icons.Filled.AddCircleOutline,
+            contentDescription = null,
+            tint = OakColors.oakMedium,
+            modifier = Modifier.size(18.dp)
+        )
+        Text(label, color = OakColors.oakMedium, fontSize = 15.sp)
+    }
+}
+
+/** Card/row fill for grouped forms. */
+private fun rowSurface(isDark: Boolean): Color =
+    if (isDark) Color(0xFF2A241D) else Color.White
+
+/** The grouped-form backdrop behind the cards. */
+private fun groupedBackground(isDark: Boolean): Color =
+    if (isDark) Color(0xFF17130F) else Color(0xFFF2EDE4)
+
+private fun navBarSurface(isDark: Boolean): Color =
+    if (isDark) Color(0xFF221C16) else Color(0xFFFAF7F1)

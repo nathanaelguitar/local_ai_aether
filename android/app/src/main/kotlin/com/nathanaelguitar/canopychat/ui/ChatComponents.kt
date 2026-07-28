@@ -33,7 +33,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.EnergySavingsLeaf
 import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -66,6 +65,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.res.painterResource
+import com.nathanaelguitar.canopychat.R
 import androidx.compose.ui.window.Dialog
 import com.nathanaelguitar.canopychat.core.ChatAttachment
 import kotlin.math.max
@@ -87,7 +88,7 @@ fun ChatEmptyState(personaName: String, isDark: Boolean) {
             contentAlignment = Alignment.Center
         ) {
             Icon(
-                Icons.Filled.EnergySavingsLeaf,
+                painterResource(R.drawable.ic_leaf_fill),
                 contentDescription = null,
                 tint = OakColors.forestMedium,
                 modifier = Modifier.size(34.dp)
@@ -366,7 +367,7 @@ private fun WoodlandWalkScene(isDark: Boolean) {
         // Celebration leaf that floats up when the sprout arrives.
         if (!walking) {
             Icon(
-                Icons.Filled.EnergySavingsLeaf,
+                painterResource(R.drawable.ic_leaf_fill),
                 contentDescription = null,
                 tint = OakColors.forestMedium.copy(alpha = 0.85f),
                 modifier = Modifier

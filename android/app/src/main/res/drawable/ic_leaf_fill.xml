@@ -1,0 +1,24 @@
+<!--
+  SF Symbol `leaf.fill`, traced from the glyph itself (rendered via NSImage on macOS,
+  vectorized with potrace) so the Android leaf is pixel-identical to iOS — same broad
+  blade, same swoosh vein, stem sweeping out the bottom-right. The earlier hand-drawn
+  approximation faced the wrong way.
+
+  potrace emits y-flipped tenth-units; the group below applies its
+  translate(0,1224) scale(0.1,-0.1) transform.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="1440"
+    android:viewportHeight="1224">
+    <group
+        android:scaleX="0.1"
+        android:scaleY="-0.1"
+        android:translateX="0"
+        android:translateY="1224">
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M509 12226 c-109 -29 -208 -119 -266 -241 -41 -88 -77 -252 -122 -567 -119 -829 -150 -1797 -86 -2643 283 -3682 2285 -6323 5400 -7120 671 -172 1301 -248 2045 -249 387 0 548 9 880 50 1057 130 1996 514 2765 1129 176 141 394 343 505 468 47 52 88 96 91 96 8 1 158 -215 236 -339 329 -527 562 -1059 888 -2032 79 -235 158 -455 176 -489 67 -126 180 -220 314 -262 91 -28 265 -29 370 -3 349 89 605 387 676 786 21 118 17 325 -10 450 -45 212 -120 409 -256 680 -335 663 -993 1528 -1651 2170 -716 698 -1629 1194 -2834 1539 -448 128 -932 236 -1728 386 -1292 244 -1776 363 -2282 562 -155 61 -451 205 -580 283 -529 317 -908 754 -1134 1307 -53 128 -60 197 -27 261 54 105 157 140 266 88 32 -15 101 -72 190 -156 655 -619 1392 -963 2440 -1139 280 -47 584 -82 1435 -166 840 -83 1366 -172 1857 -314 851 -246 1549 -632 2233 -1235 148 -130 223 -174 313 -183 115 -12 230 53 281 160 51 107 80 422 79 887 0 920 -159 1656 -507 2345 -224 443 -481 787 -849 1133 -628 589 -1540 1019 -2567 1207 -528 96 -913 130 -1505 130 -522 0 -748 -17 -1795 -135 -950 -107 -1239 -126 -1755 -116 -440 8 -712 29 -1000 77 -803 134 -1398 428 -1934 957 -144 142 -165 160 -240 198 -106 52 -214 67 -312 40z" />
+    </group>
+</vector>

@@ -24,7 +24,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.EnergySavingsLeaf
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -46,6 +45,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.res.painterResource
 import com.nathanaelguitar.canopychat.core.CanopyNotifications
 import com.nathanaelguitar.canopychat.core.CanopySubscriptionManager
 import com.nathanaelguitar.canopychat.ui.ChatScreen
@@ -235,7 +235,7 @@ private fun ContributorConsentOverlay(isDark: Boolean, onAgree: () -> Unit, onDi
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        Icons.Filled.EnergySavingsLeaf,
+                        painterResource(R.drawable.ic_leaf_fill),
                         contentDescription = null,
                         tint = OakColors.forestMedium,
                         modifier = Modifier.size(19.dp)
