@@ -810,8 +810,7 @@ class AppState: ObservableObject {
             modelLoadingMessage = nil
             generationStatusMessage = nil
             streamingPreview = nil
-            let errorMessage = localBackgroundInterruptionMessage(for: error)
-                ?? "Inference error: \(inferenceErrorDescription(error))"
+            let errorMessage = userFacingInferenceErrorMessage(for: error)
             appendAssistantMessage(to: id, content: errorMessage)
             let failedMessageID = conversations.first(where: { $0.id == id })?.messages.last(where: { $0.role == .assistant })?.id
             AetherBetaTelemetry.shared.record(
@@ -1177,11 +1176,31 @@ class AppState: ObservableObject {
         return String(describing: error)
     }
 
+    private func userFacingInferenceErrorMessage(for error: Error) -> String {
+        if let interruptionMessage = localBackgroundInterruptionMessage(for: error) {
+            return interruptionMessage
+        }
+
+        switch error {
+        case AetherOnDeviceError.modelDownloadFailed,
+             AetherOnDeviceError.invalidModelURL:
+            return "CanopyChat needs to download a model before it can respond. Please check your internet connection and try again."
+        case AetherOnDeviceError.modelLoadFailed,
+             AetherOnDeviceError.contextLoadFailed,
+             AetherOnDeviceError.llamaUnavailable:
+            return "CanopyChat couldn't start right now. Please try sending your message again."
+        case AetherOnDeviceError.emptyResponse:
+            return "CanopyChat didn't finish responding. Keep the app open while it responds, then try again."
+        default:
+            return "CanopyChat couldn't finish responding. Keep the app open while it responds, then try again."
+        }
+    }
+
     private func localBackgroundInterruptionMessage(for error: Error) -> String? {
         guard !appIsActive, let localError = error as? AetherOnDeviceError else { return nil }
         switch localError {
         case .decodeFailed, .emptyResponse, .multimodalDecodeFailed:
-            return "CanopyChat was interrupted while running local inference in the background. The local model has been reset; please resend the message."
+            return "You left the app, so Canopy was interrupted while responding. Stay in the app while waiting for a reply next time. Please try again."
         default:
             return nil
         }

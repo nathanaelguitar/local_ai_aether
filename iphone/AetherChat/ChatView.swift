@@ -19,6 +19,7 @@ struct ChatView: View {
     @State private var showingRenameDialog = false
     @State private var titleDraft = ""
     @State private var sendTask: Task<Void, Never>?
+    @State private var inferenceStartedAt = Date()
     @State private var sharePayload: SharePayload?
     @State private var editingPrompt: PromptEditDraft?
     @FocusState private var inputFocused: Bool
@@ -198,10 +199,18 @@ struct ChatView: View {
                     }
                     if isSending && state.modelLoadingMessage == nil {
                         if let preview = state.streamingPreview, !preview.isEmpty {
-                            StreamingBubble(text: preview, isDark: state.isDarkTheme, fontScale: state.messageFontScale)
+                            StreamingBubble(
+                                text: preview,
+                                isDark: state.isDarkTheme,
+                                fontScale: state.messageFontScale
+                            )
                                 .id("typing")
                         } else {
-                            TypingIndicator(message: state.generationStatusMessage, isDark: state.isDarkTheme)
+                            TypingIndicator(
+                                message: state.generationStatusMessage,
+                                isDark: state.isDarkTheme,
+                                startedAt: inferenceStartedAt
+                            )
                                 .id("typing")
                         }
                     }
@@ -218,7 +227,10 @@ struct ChatView: View {
                 scrollToLatestMessage(using: proxy)
             }
             .onChange(of: isSending) {
-                if isSending { withAnimation { proxy.scrollTo("typing", anchor: .bottom) } }
+                if isSending {
+                    inferenceStartedAt = Date()
+                    withAnimation { proxy.scrollTo("typing", anchor: .bottom) }
+                }
             }
             .onChange(of: state.webSearchSuggestion?.id) {
                 if state.webSearchSuggestion != nil {
@@ -1861,9 +1873,10 @@ struct StreamingBubble: View {
 struct TypingIndicator: View {
     let message: String?
     let isDark: Bool
-    @State private var appearedAt = Date()
+    let startedAt: Date
 
     private static let composingPhrases = [
+        "Please stay in the app while waiting for a response.",
         "Composing a response",
         "Gathering thoughts",
         "Choosing the right words",
@@ -1872,10 +1885,13 @@ struct TypingIndicator: View {
     ]
 
     private func statusText(at time: TimeInterval) -> String {
+        let elapsed = time - startedAt.timeIntervalSinceReferenceDate
+        if elapsed < 6 {
+            return Self.composingPhrases[0]
+        }
         if let message, !message.isEmpty, message != "Composing a response" {
             return message
         }
-        let elapsed = time - appearedAt.timeIntervalSinceReferenceDate
         let index = min(max(0, Int(elapsed / 6)), Self.composingPhrases.count - 1)
         return Self.composingPhrases[index]
     }
@@ -1886,35 +1902,39 @@ struct TypingIndicator: View {
                 let time = timeline.date.timeIntervalSinceReferenceDate
                 let breath = sin(time * 2.6)
 
-                HStack(spacing: 10) {
-                    ZStack {
-                        Circle()
-                            .fill(
-                                RadialGradient(
-                                    colors: [AetherColors.amber.opacity(0.5), .clear],
-                                    center: .center,
-                                    startRadius: 1,
-                                    endRadius: 13
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 10) {
+                        ZStack {
+                            Circle()
+                                .fill(
+                                    RadialGradient(
+                                        colors: [AetherColors.amber.opacity(0.5), .clear],
+                                        center: .center,
+                                        startRadius: 1,
+                                        endRadius: 13
+                                    )
                                 )
-                            )
-                            .frame(width: 26, height: 26)
-                            .scaleEffect(1 + 0.22 * breath)
-                        Circle()
-                            .fill(
-                                LinearGradient(
-                                    colors: [AetherColors.amber, AetherColors.copper],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
+                                .frame(width: 26, height: 26)
+                                .scaleEffect(1 + 0.22 * breath)
+                            Circle()
+                                .fill(
+                                    LinearGradient(
+                                        colors: [AetherColors.amber, AetherColors.copper],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
                                 )
-                            )
-                            .frame(width: 9, height: 9)
-                            .scaleEffect(1 + 0.14 * breath)
-                    }
-                    .frame(width: 18, height: 18)
+                                .frame(width: 9, height: 9)
+                                .scaleEffect(1 + 0.14 * breath)
+                        }
+                        .frame(width: 18, height: 18)
 
-                    Text(statusText(at: time))
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(shimmer(at: time))
+                        Text(statusText(at: time))
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(shimmer(at: time))
+
+                        Spacer(minLength: 0)
+                    }
                 }
             }
             .padding(.horizontal, 14)
