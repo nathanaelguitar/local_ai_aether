@@ -2,6 +2,7 @@ import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { createFoundingMemberCheckout } from "../src/checkout";
 import { beginWebhookEvent, getFoundingMemberBySession } from "../src/db";
+import { allowedBrowserOrigin } from "../src/index";
 import { lookupCheckoutSessionStatus } from "../src/sessionStatus";
 import type { Env } from "../src/types";
 import { fulfillWebhookEvent, verifyStripeWebhook } from "../src/webhook";
@@ -209,6 +210,37 @@ describe("createFoundingMemberCheckout", () => {
     expect(capturedParams.line_items[0].price).toBe(testEnv().STRIPE_FOUNDING_MEMBER_PRICE_ID);
     expect(capturedParams).not.toHaveProperty("amount");
     expect(capturedParams).not.toHaveProperty("currency");
+  });
+
+  it("uses an allowlisted localhost return URL only in test mode", async () => {
+    let capturedParams: any;
+    const stripe = makeStubStripe({
+      createSession: (params) => {
+        capturedParams = params;
+        return fakeCheckoutSession();
+      },
+    });
+
+    await createFoundingMemberCheckout(stripe, testEnv(), {
+      internalUserId: null,
+      returnOrigin: "http://127.0.0.1:8765",
+    });
+    expect(capturedParams.success_url).toBe(
+      "http://127.0.0.1:8765/founding-success.html?session_id={CHECKOUT_SESSION_ID}",
+    );
+    expect(capturedParams.cancel_url).toBe(
+      "http://127.0.0.1:8765/founding.html?checkout=cancelled",
+    );
+
+    const liveEnv = { ...testEnv(), ENVIRONMENT: "live" };
+    expect(
+      allowedBrowserOrigin(
+        new Request("https://founding-api.canopychat.app/v1/checkout", {
+          headers: { Origin: "http://127.0.0.1:8765" },
+        }),
+        liveEnv,
+      ),
+    ).toBeNull();
   });
 
   it("fails closed when configuration is missing or mixes live and test modes", async () => {
@@ -579,6 +611,27 @@ describe("HTTP router", () => {
     );
     expect(checkout.status).toBe(403);
     expect(status.status).toBe(403);
+  });
+
+  it("allows the exact localhost preview origin only in test mode", async () => {
+    const preflight = await SELF.fetch("https://founding-api.canopychat.app/v1/checkout", {
+      method: "OPTIONS",
+      headers: {
+        Origin: "http://127.0.0.1:8765",
+        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "content-type",
+      },
+    });
+    expect(preflight.status).toBe(204);
+    expect(preflight.headers.get("Access-Control-Allow-Origin")).toBe(
+      "http://127.0.0.1:8765",
+    );
+
+    const wrongPort = await SELF.fetch("https://founding-api.canopychat.app/v1/checkout", {
+      method: "OPTIONS",
+      headers: { Origin: "http://127.0.0.1:9999" },
+    });
+    expect(wrongPort.status).toBe(403);
   });
 
   it("rejects browser-supplied checkout fields", async () => {

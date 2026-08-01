@@ -11,6 +11,8 @@ import type { Env } from "./types";
 export interface CreateCheckoutInput {
   /** Only trusted when it came from server-side authentication — never from an unauthenticated request body. */
   internalUserId: string | null;
+  /** Exact browser origin after server-side allowlist validation. */
+  returnOrigin?: string;
 }
 
 export type CreateCheckoutResult =
@@ -55,6 +57,18 @@ export function isCheckoutConfigurationValid(env: Env): boolean {
   );
 }
 
+function checkoutReturnOrigin(env: Env, requestedOrigin?: string): string {
+  const configuredOrigin = new URL(env.PUBLIC_SITE_URL).origin;
+  if (
+    env.ENVIRONMENT === "test" &&
+    (requestedOrigin === "http://127.0.0.1:8765" ||
+      requestedOrigin === "http://localhost:8765")
+  ) {
+    return requestedOrigin;
+  }
+  return configuredOrigin;
+}
+
 /**
  * Creates a Stripe Checkout Session for the Founding Member one-time offer.
  *
@@ -88,8 +102,9 @@ export async function createFoundingMemberCheckout(
     return { ok: false, reason: "capacity_reached" };
   }
 
-  const successUrl = `${env.PUBLIC_SITE_URL}/founding-success.html?session_id={CHECKOUT_SESSION_ID}`;
-  const cancelUrl = `${env.PUBLIC_SITE_URL}/founding.html?checkout=cancelled`;
+  const returnOrigin = checkoutReturnOrigin(env, input.returnOrigin);
+  const successUrl = `${returnOrigin}/founding-success.html?session_id={CHECKOUT_SESSION_ID}`;
+  const cancelUrl = `${returnOrigin}/founding.html?checkout=cancelled`;
 
   try {
     const session = await stripe.checkout.sessions.create(

@@ -20,23 +20,44 @@ function siteOrigin(env: Env): string {
   }
 }
 
-function corsHeaders(env: Env): HeadersInit {
+const LOCAL_TEST_ORIGINS = new Set([
+  "http://127.0.0.1:8765",
+  "http://localhost:8765",
+]);
+
+export function allowedBrowserOrigin(request: Request, env: Env): string | null {
+  const origin = request.headers.get("Origin");
+  if (origin === siteOrigin(env)) return origin;
+  if (env.ENVIRONMENT === "test" && origin && LOCAL_TEST_ORIGINS.has(origin)) {
+    return origin;
+  }
+  return null;
+}
+
+function corsHeaders(env: Env, request?: Request): HeadersInit {
+  const origin = request ? allowedBrowserOrigin(request, env) : null;
   return {
-    "Access-Control-Allow-Origin": siteOrigin(env),
+    "Access-Control-Allow-Origin": origin ?? siteOrigin(env),
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
     Vary: "Origin",
   };
 }
 
-function json(body: unknown, status: number, env: Env, extra?: HeadersInit): Response {
+function json(
+  body: unknown,
+  status: number,
+  env: Env,
+  extra?: HeadersInit,
+  request?: Request,
+): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: {
       "Content-Type": "application/json; charset=utf-8",
       "Cache-Control": "no-store",
       "X-Content-Type-Options": "nosniff",
-      ...corsHeaders(env),
+      ...corsHeaders(env, request),
       ...extra,
     },
   });
@@ -46,10 +67,6 @@ function clientIp(request: Request): string {
   // Cloudflare replaces this header at the edge. Do not trust caller-provided
   // X-Forwarded-For for an abuse-control identity.
   return request.headers.get("CF-Connecting-IP")?.trim() || "local-development";
-}
-
-function isAllowedBrowserOrigin(request: Request, env: Env): boolean {
-  return request.headers.get("Origin") === siteOrigin(env);
 }
 
 function isUsCheckoutRequest(request: Request, env: Env): boolean {
@@ -117,20 +134,21 @@ async function parseEmptyCheckoutBody(request: Request): Promise<boolean> {
 }
 
 async function handleCreateCheckout(request: Request, env: Env): Promise<Response> {
-  if (!isAllowedBrowserOrigin(request, env)) {
+  const browserOrigin = allowedBrowserOrigin(request, env);
+  if (!browserOrigin) {
     return json({ error: "origin_not_allowed" }, 403, env);
   }
   if (!isCheckoutConfigurationValid(env)) {
-    return json({ error: "service_misconfigured" }, 503, env);
+    return json({ error: "service_misconfigured" }, 503, env, undefined, request);
   }
   if (!(await parseEmptyCheckoutBody(request))) {
-    return json({ error: "invalid_request" }, 400, env);
+    return json({ error: "invalid_request" }, 400, env, undefined, request);
   }
   if (!isUsCheckoutRequest(request, env)) {
     log("info", "checkout_country_not_supported", {
       country: request.cf?.country ?? "unknown",
     });
-    return json({ error: "country_not_supported" }, 403, env);
+    return json({ error: "country_not_supported" }, 403, env, undefined, request);
   }
 
   const rateLimit = await checkRequestRateLimit(
@@ -143,9 +161,13 @@ async function handleCreateCheckout(request: Request, env: Env): Promise<Respons
   );
   if (!rateLimit.allowed) {
     log("warn", "checkout_rate_limited");
-    return json({ error: "rate_limited" }, 429, env, {
-      "Retry-After": String(rateLimit.retryAfterSeconds),
-    });
+    return json(
+      { error: "rate_limited" },
+      429,
+      env,
+      { "Retry-After": String(rateLimit.retryAfterSeconds) },
+      request,
+    );
   }
 
   // There is no authentication on the static site. A future verified account
@@ -154,26 +176,27 @@ async function handleCreateCheckout(request: Request, env: Env): Promise<Respons
   try {
     result = await createFoundingMemberCheckout(newStripeClient(env), env, {
       internalUserId: null,
+      returnOrigin: browserOrigin,
     });
   } catch {
     log("error", "checkout_internal_failure");
-    return json({ error: "checkout_unavailable" }, 503, env);
+    return json({ error: "checkout_unavailable" }, 503, env, undefined, request);
   }
 
   if (!result.ok) {
     if (result.reason === "capacity_reached") {
       log("info", "checkout_capacity_reached");
-      return json({ error: "capacity_reached" }, 409, env);
+      return json({ error: "capacity_reached" }, 409, env, undefined, request);
     }
     if (result.reason === "misconfigured") {
-      return json({ error: "service_misconfigured" }, 503, env);
+      return json({ error: "service_misconfigured" }, 503, env, undefined, request);
     }
     log("error", "checkout_session_creation_failed", { reason: result.detail });
-    return json({ error: "checkout_unavailable" }, 502, env);
+    return json({ error: "checkout_unavailable" }, 502, env, undefined, request);
   }
 
   log("info", "checkout_session_created");
-  return json({ url: result.url }, 200, env);
+  return json({ url: result.url }, 200, env, undefined, request);
 }
 
 async function handleWebhook(request: Request, env: Env): Promise<Response> {
@@ -231,11 +254,11 @@ async function handleWebhook(request: Request, env: Env): Promise<Response> {
 }
 
 async function handleCheckoutSessionStatus(request: Request, env: Env): Promise<Response> {
-  if (!isAllowedBrowserOrigin(request, env)) {
+  if (!allowedBrowserOrigin(request, env)) {
     return json({ error: "origin_not_allowed" }, 403, env);
   }
   if (!isCheckoutConfigurationValid(env)) {
-    return json({ error: "service_misconfigured" }, 503, env);
+    return json({ error: "service_misconfigured" }, 503, env, undefined, request);
   }
 
   const rateLimit = await checkRequestRateLimit(
@@ -247,14 +270,18 @@ async function handleCheckoutSessionStatus(request: Request, env: Env): Promise<
     RATE_LIMIT_WINDOW_SECONDS,
   );
   if (!rateLimit.allowed) {
-    return json({ error: "rate_limited" }, 429, env, {
-      "Retry-After": String(rateLimit.retryAfterSeconds),
-    });
+    return json(
+      { error: "rate_limited" },
+      429,
+      env,
+      { "Retry-After": String(rateLimit.retryAfterSeconds) },
+      request,
+    );
   }
 
   const sessionId = new URL(request.url).searchParams.get("session_id")?.trim();
   if (!sessionId || sessionId.length > 255 || !/^cs_(?:test_)?[A-Za-z0-9_]+$/.test(sessionId)) {
-    return json({ error: "invalid_session_id" }, 400, env);
+    return json({ error: "invalid_session_id" }, 400, env, undefined, request);
   }
 
   const status = await lookupCheckoutSessionStatus(
@@ -262,7 +289,7 @@ async function handleCheckoutSessionStatus(request: Request, env: Env): Promise<
     env,
     sessionId,
   );
-  return json(status, 200, env);
+  return json(status, 200, env, undefined, request);
 }
 
 function methodNotAllowed(env: Env, allow: string): Response {
@@ -276,10 +303,10 @@ export default {
 
     if (method === "OPTIONS") {
       const isFrontendRoute = pathname === "/v1/checkout" || pathname === "/v1/checkout-session";
-      if (!isFrontendRoute || !isAllowedBrowserOrigin(request, env)) {
+      if (!isFrontendRoute || !allowedBrowserOrigin(request, env)) {
         return json({ error: "origin_not_allowed" }, 403, env);
       }
-      return new Response(null, { status: 204, headers: corsHeaders(env) });
+      return new Response(null, { status: 204, headers: corsHeaders(env, request) });
     }
 
     if (pathname === "/health") {

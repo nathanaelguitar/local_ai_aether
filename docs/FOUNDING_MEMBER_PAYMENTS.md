@@ -387,6 +387,10 @@ Expected test response:
 
 The frontend checkout connection is on a draft pull-request branch, not the
 public site. Do not merge it until the owner explicitly approves publication.
+For owner validation, the deployed test Worker also accepts exactly
+`http://127.0.0.1:8765` and `http://localhost:8765`. Those origins are rejected
+unless `ENVIRONMENT=test`, and Stripe returns to the same validated local
+origin after test Checkout.
 
 ## Test-to-live checklist
 
