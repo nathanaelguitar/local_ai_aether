@@ -385,6 +385,12 @@ Expected test response:
 {"status":"ok","environment":"test"}
 ```
 
+The live environment is isolated as `wrangler --env production` with Worker
+name `canopy-founding-members-live` and D1 database
+`canopy-founding-members-live`. Its committed kill switch remains
+`LIVE_PAYMENTS_ENABLED=false` until all live Stripe resources and secrets have
+been verified together.
+
 The frontend checkout connection is on a draft pull-request branch, not the
 public site. Do not merge it until the owner explicitly approves publication.
 For owner validation, the deployed test Worker also accepts exactly
