@@ -1,0 +1,24 @@
+{
+  "name": "canopy-founding-members",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:migrate:local": "wrangler d1 migrations apply canopy-founding-members --local",
+    "db:migrate:remote": "wrangler d1 migrations apply canopy-founding-members --remote"
+  },
+  "dependencies": {
+    "stripe": "^22.4.0"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.20.1",
+    "@cloudflare/workers-types": "^5.20260801.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.10",
+    "wrangler": "^4.118.0"
+  }
+}
