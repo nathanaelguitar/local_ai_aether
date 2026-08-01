@@ -12,16 +12,16 @@ Payment fulfillment deliberately leaves `premium_activated_at` and
 ## Current deployment status
 
 - Static site: GitHub Pages at `https://canopychat.app`
-- Payment API: Cloudflare Worker `canopy-founding-members` (not deployed yet)
-- Intended API hostname: `https://founding-api.canopychat.app`
+- Payment API: Cloudflare Worker `canopy-founding-members`, deployed in test mode
+- API hostname: `https://founding-api.canopychat.app` (active; health check passes)
 - D1 database: `canopy-founding-members`
-  (`b5f9dea2-5fab-4b6e-83fd-4007b2c30eb5`), created and migrated in test setup
+  (`b5f9dea2-5fab-4b6e-83fd-4007b2c30eb5`), created and migrated
 - Stripe mode: test only; credentials are stored in a mode-`0600`, gitignored
   local `.env` and are not committed or deployed
 - Stripe test Product: `prod_UzgQBh4WeIVtlK`
 - Stripe test one-time Price: `price_1Tzh3EEqEljz4LpyWSWKxLD4`
-- Stripe test webhook: `we_1Tzh4QEqEljz4LpyPL6GBgOB`, intentionally
-  disabled until the Worker endpoint is deployed
+- Stripe test webhook: `we_1Tzh4QEqEljz4LpyPL6GBgOB`, enabled and delivering
+  successfully to the custom Worker hostname
 - Live payments: hard-disabled unless `ENVIRONMENT=live` and
   `LIVE_PAYMENTS_ENABLED=true` are both deliberately configured with live-mode
   resources
@@ -156,8 +156,8 @@ Subscribe the test-mode endpoint to:
 - `charge.dispute.created`
 
 Store its `whsec_...` signing secret as `STRIPE_WEBHOOK_SECRET`. The test
-endpoint has been created and its secret stored locally, but delivery remains
-disabled until the Worker is reachable.
+endpoint is enabled, its signing secret is installed as an encrypted Worker
+secret, and signed deliveries have been verified end to end.
 
 The webhook:
 
@@ -332,7 +332,7 @@ An actual Checkout Session created by the Worker is the preferred full-flow
 test because generic CLI fixtures will not automatically contain this Worker’s
 server-generated metadata and Price ID.
 
-Full test-mode journey:
+Full test-mode journey (completed successfully on 2026-08-01):
 
 1. Open the Founding Members page.
 2. Select the CTA.
@@ -347,8 +347,8 @@ Full test-mode journey:
 
 ## Cloudflare deployment
 
-The D1 database and migration already exist. After rotated Stripe test resources
-are ready:
+The D1 database, migration, Worker, encrypted secrets, and custom hostname are
+already deployed in test mode. A future redeployment uses:
 
 ```bash
 cd founding_members/worker
@@ -361,8 +361,8 @@ npx wrangler secret put RATE_LIMIT_SALT
 npx wrangler deploy
 ```
 
-Then bind the custom domain `founding-api.canopychat.app` to the
-`canopy-founding-members` Worker and verify:
+The custom domain `founding-api.canopychat.app` is already bound to the
+`canopy-founding-members` Worker. Verify after each deployment:
 
 ```bash
 curl https://founding-api.canopychat.app/health
@@ -374,9 +374,8 @@ Expected test response:
 {"status":"ok","environment":"test"}
 ```
 
-Do not push the frontend checkout connection to the public site until this
-deployed test-mode flow is verified and the owner explicitly approves its
-publication.
+The frontend checkout connection is on a draft pull-request branch, not the
+public site. Do not merge it until the owner explicitly approves publication.
 
 ## Test-to-live checklist
 
@@ -388,10 +387,12 @@ publication.
       record fee is not charged on US transactions.
 - [ ] Select a transactional email provider or approve the temporary
       Stripe-receipt-only experience.
-- [ ] Run the complete test-mode journey against the deployed Worker.
+- [x] Run the complete test-mode journey against the deployed Worker.
 - [ ] Confirm the 1,000-member capacity remains the intended cohort size.
 - [ ] Create a separate live one-time Product and Price; test IDs do not carry
       into live mode.
+- [ ] Create a separate live D1 database so sandbox smoke-test records never
+      share storage with real purchasers.
 - [ ] Create a separate live webhook endpoint and signing secret.
 - [ ] Create a separate least-privilege live restricted key.
 - [ ] Replace all four Worker secrets deliberately.
