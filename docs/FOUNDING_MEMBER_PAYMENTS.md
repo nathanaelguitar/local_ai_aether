@@ -102,6 +102,8 @@ The Worker uses the current Stripe Node SDK and API version:
 - dynamic payment methods (no `payment_method_types` field)
 - `integration_identifier: canopy_founding_<8 letters>`
 - `customer_creation: "always"`
+- final/non-refundable policy disclosure beside the Checkout submit action,
+  with the legally required exception preserved
 - a new Checkout Session and unique idempotency key per attempt
 - 35-minute Checkout expiration (safely above Stripe's 30-minute minimum)
 - success and cancellation URLs derived from `PUBLIC_SITE_URL`
@@ -169,8 +171,9 @@ The webhook:
 - keeps `received` and `processing_failed` event rows retryable;
 - treats completed outcomes as terminal duplicates;
 - uses unique Checkout Session and PaymentIntent constraints;
-- records full refunds, partial refunds, and disputes for review without
-  inventing or approving a refund policy.
+- records full refunds, partial refunds, and disputes for review. The published
+  policy is final and non-refundable except where required by law; the webhook
+  observes Stripe state but never initiates or approves refunds.
 
 ## D1 data model
 
@@ -236,14 +239,22 @@ figures.
 
 ## Email confirmation
 
-There is no transactional email provider in either repository.
+`support@canopychat.app` currently uses Cloudflare Email Routing for inbound
+forwarding. It is the correct public sender and reply address, but Email Routing
+does not itself send webhook-triggered transactional messages.
 
-Until one is selected:
+Until outbound sending is enabled:
 
 - enable Stripe’s successful-payment receipts in the Dashboard;
 - treat the D1 `email_outbox` row as the integration point for a separate
   Founding Member onboarding message;
 - do not send beta credentials from the payment webhook.
+
+The smallest provider addition is Cloudflare Email Service with
+`support@canopychat.app` as the allowed sender and an Email Sending binding on
+this Worker. Sending to arbitrary purchaser addresses requires a Workers Paid
+plan. Do not add the binding to production until the plan and sender domain are
+approved and active.
 
 The future email sender should send only after a pending outbox row exists and
 should include: one-time payment, no recurring billing, beta invitation arrives
@@ -381,7 +392,8 @@ public site. Do not merge it until the owner explicitly approves publication.
 
 - [ ] Rotate any Stripe key that was pasted into chat, logs, or another unsafe
       channel and review Stripe Workbench for unrecognized use.
-- [ ] Finalize and publish a Founding Member refund policy.
+- [x] Publish the Founding Member policy: final and non-refundable except where
+      required by law; no subscription or future charge is authorized.
 - [x] Use standard Stripe Payments and limit beta enrollment to US purchasers.
       Managed Payments is explicitly disabled so its additional merchant-of-
       record fee is not charged on US transactions.
@@ -399,21 +411,21 @@ public site. Do not merge it until the owner explicitly approves publication.
 - [ ] Change `ENVIRONMENT` to `live` and explicitly set
       `LIVE_PAYMENTS_ENABLED=true` in the same reviewed deployment.
 - [ ] Make one small real purchase, verify one D1 record and no Subscription,
-      then refund manually if consistent with the finalized policy.
+      and retain the purchase as the live smoke test.
 - [ ] Publish the frontend connection only after the live smoke test is clean.
 
 ## Remaining decisions and blockers
 
-1. **Refund policy:** no Founding Member refund policy exists in `terms.html`.
-   This blocks live launch; no legal language has been fabricated.
-2. **US indirect tax registrations:** CanopyChat remains the merchant of record.
+1. **US indirect tax registrations:** CanopyChat remains the merchant of record.
    Automatic Stripe Tax has not been silently enabled; determine applicable US
    registrations before collecting sales tax in any jurisdiction.
-3. **Transactional email:** the outbox exists, but a provider and sender do not.
-4. **Account claiming:** no authentication exists. A future account flow should
+2. **Transactional email:** the outbox exists. `support@canopychat.app` is an
+   inbound forwarding address; approve Cloudflare Email Service/Workers Paid or
+   use Stripe receipts temporarily before live launch.
+3. **Account claiming:** no authentication exists. A future account flow should
    link the Stripe email to a verified account rather than trusting arbitrary
    browser-supplied IDs.
-5. **Beta activation:** a separate trusted operation must set
+4. **Beta activation:** a separate trusted operation must set
    `premium_activated_at` and calculate `premium_expires_at` three months later.
 
 ## Security review

@@ -105,6 +105,12 @@ export async function createFoundingMemberCheckout(
         expires_at: expiresAt,
         success_url: successUrl,
         cancel_url: cancelUrl,
+        custom_text: {
+          submit: {
+            message:
+              "Founding Membership payments are final and non-refundable, except where required by law. This one-time payment does not begin a subscription.",
+          },
+        },
         // A Customer record alone carries no billing authorization — it does
         // not save a payment method or permit any future charge. It just
         // gives us a stable Stripe identity if this person is invited to a

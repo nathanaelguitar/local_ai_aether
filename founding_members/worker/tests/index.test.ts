@@ -183,6 +183,12 @@ describe("createFoundingMemberCheckout", () => {
     expect(capturedParams.managed_payments).toEqual({ enabled: false });
     expect(capturedParams.billing_address_collection).toBe("required");
     expect(capturedParams.customer_creation).toBe("always");
+    expect(capturedParams.custom_text.submit.message).toContain(
+      "final and non-refundable, except where required by law",
+    );
+    expect(capturedParams.custom_text.submit.message).toContain(
+      "does not begin a subscription",
+    );
     expect(capturedParams).not.toHaveProperty("payment_method_types");
     expect(capturedParams).not.toHaveProperty("subscription_data");
     expect(capturedParams).not.toHaveProperty("payment_intent_data.setup_future_usage");
