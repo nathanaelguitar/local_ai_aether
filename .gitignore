@@ -4,6 +4,12 @@ __pycache__/
 *.pyo
 .env
 
+# Node / Cloudflare Workers
+node_modules/
+dist/
+.wrangler/
+.dev.vars
+
 # Android/Gradle generated build output
 android/.gradle/
 android/.kotlin/

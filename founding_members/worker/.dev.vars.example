@@ -1,0 +1,10 @@
+# Copy to .dev.vars for local `wrangler dev` only. Never commit .dev.vars.
+# Production secrets are set with `wrangler secret put <NAME>` instead — see
+# docs/FOUNDING_MEMBER_PAYMENTS.md.
+
+# Prefer a Stripe restricted test key with only the Checkout Session access
+# this Worker requires. A standard sk_test key also works during setup.
+STRIPE_SECRET_KEY=rk_test_REPLACE_ME
+STRIPE_WEBHOOK_SECRET=whsec_REPLACE_ME
+STRIPE_FOUNDING_MEMBER_PRICE_ID=price_REPLACE_ME
+RATE_LIMIT_SALT=replace_with_at_least_32_random_bytes

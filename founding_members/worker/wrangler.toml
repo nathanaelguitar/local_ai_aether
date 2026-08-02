@@ -1,0 +1,54 @@
+name = "canopy-founding-members"
+main = "src/index.ts"
+compatibility_date = "2026-07-31"
+compatibility_flags = ["nodejs_compat"]
+
+# Secrets (set via `wrangler secret put <NAME>`):
+#   STRIPE_SECRET_KEY              - Prefer a least-privilege restricted key
+#                                    (rk_test_... / rk_live_...). Never commit it.
+#   STRIPE_WEBHOOK_SECRET           - Stripe webhook signing secret (whsec_...)
+#   STRIPE_FOUNDING_MEMBER_PRICE_ID - Price ID for the one-time $10 Founding
+#                                      Member price, created in the Stripe
+#                                      Dashboard (Product > Price, one-time,
+#                                      NOT recurring)
+#   RATE_LIMIT_SALT                 - random secret used to HMAC client IPs
+
+[vars]
+ENVIRONMENT = "test"
+LIVE_PAYMENTS_ENABLED = "false"
+PUBLIC_SITE_URL = "https://canopychat.app"
+OFFER_VERSION = "founding_member_v1"
+# The current enrollment group is intentionally capped at 1,000. Keep this
+# server-side; the public page never displays a fabricated remaining count.
+FOUNDING_MEMBER_CAPACITY = "1000"
+
+[observability]
+enabled = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "canopy-founding-members"
+database_id = "b5f9dea2-5fab-4b6e-83fd-4007b2c30eb5"
+
+# Isolated live environment. Live payments are enabled only after the live
+# Product/Price, restricted key, webhook secret, and D1 migration are verified.
+[env.production]
+name = "canopy-founding-members-live"
+
+[env.production.vars]
+ENVIRONMENT = "live"
+LIVE_PAYMENTS_ENABLED = "true"
+PUBLIC_SITE_URL = "https://canopychat.app"
+OFFER_VERSION = "founding_member_v1"
+FOUNDING_MEMBER_CAPACITY = "1000"
+
+[env.production.observability]
+enabled = true
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "canopy-founding-members-live"
+database_id = "7bf4bd36-0869-478c-9252-e415b237f8d6"
+
+# Bind the custom hostname through Cloudflare after the Worker is deployed:
+#   founding-api.canopychat.app/*
