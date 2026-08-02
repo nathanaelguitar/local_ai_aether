@@ -2,6 +2,7 @@ name = "canopy-founding-members"
 main = "src/index.ts"
 compatibility_date = "2026-07-31"
 compatibility_flags = ["nodejs_compat"]
+triggers = { crons = ["*/5 * * * *"] }
 
 # Secrets (set via `wrangler secret put <NAME>`):
 #   STRIPE_SECRET_KEY              - Prefer a least-privilege restricted key
@@ -12,6 +13,9 @@ compatibility_flags = ["nodejs_compat"]
 #                                      Dashboard (Product > Price, one-time,
 #                                      NOT recurring)
 #   RATE_LIMIT_SALT                 - random secret used to HMAC client IPs
+#   GMAIL_CLIENT_ID                  - OAuth client ID for the Canopy sender mailbox
+#   GMAIL_CLIENT_SECRET              - OAuth client secret (secret)
+#   GMAIL_REFRESH_TOKEN              - OAuth refresh token with gmail.send (secret)
 
 [vars]
 ENVIRONMENT = "test"
@@ -21,6 +25,9 @@ OFFER_VERSION = "founding_member_v1"
 # The current enrollment group is intentionally capped at 1,000. Keep this
 # server-side; the public page never displays a fabricated remaining count.
 FOUNDING_MEMBER_CAPACITY = "1000"
+GMAIL_SENDER = "support@canopychat.app"
+TESTFLIGHT_URL = "https://testflight.apple.com/join/f5xCZmVv"
+TESTFLIGHT_CODE = "CANOPY-TEST"
 
 [observability]
 enabled = true
@@ -41,6 +48,9 @@ LIVE_PAYMENTS_ENABLED = "true"
 PUBLIC_SITE_URL = "https://canopychat.app"
 OFFER_VERSION = "founding_member_v1"
 FOUNDING_MEMBER_CAPACITY = "1000"
+GMAIL_SENDER = "support@canopychat.app"
+TESTFLIGHT_URL = "https://testflight.apple.com/join/f5xCZmVv"
+TESTFLIGHT_CODE = "CANOPY-TEST"
 
 [env.production.observability]
 enabled = true

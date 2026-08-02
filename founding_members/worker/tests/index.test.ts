@@ -71,6 +71,8 @@ CREATE TABLE IF NOT EXISTS email_outbox (
   created_at TEXT NOT NULL,
   sent_at TEXT,
   last_error TEXT,
+  updated_at TEXT,
+  next_attempt_at TEXT,
   FOREIGN KEY (member_id) REFERENCES founding_members(id)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_email_outbox_member_type ON email_outbox (member_id, message_type);
