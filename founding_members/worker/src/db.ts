@@ -134,10 +134,11 @@ export async function commitFoundingMemberFulfillment(
       db
         .prepare(
           `INSERT INTO email_outbox (
-            id, member_id, message_type, recipient, status, attempts, created_at
-          ) VALUES (?, ?, 'founding_member_confirmation', ?, 'pending', 0, ?)`,
+            id, member_id, message_type, recipient, status, attempts, created_at,
+            updated_at, next_attempt_at
+          ) VALUES (?, ?, 'founding_member_confirmation', ?, 'pending', 0, ?, ?, ?)`,
         )
-        .bind(crypto.randomUUID(), input.id, input.email, now),
+        .bind(crypto.randomUUID(), input.id, input.email, now, now, now),
       db
         .prepare(
           `INSERT INTO webhook_events (stripe_event_id, event_type, received_at, outcome)
@@ -217,4 +218,89 @@ export async function updateMemberAfterPaymentAdjustment(
       .bind(eventId),
   ]);
   return true;
+}
+
+export interface PendingEmailRow {
+  outbox_id: string;
+  member_id: string;
+  recipient: string;
+  attempts: number;
+  email: string;
+  purchased_at: string;
+  member_status: string;
+}
+
+/** Claim one outbox row; stale claims can be recovered after an isolate dies. */
+export async function claimPendingEmail(
+  db: D1Database,
+  now: string,
+  staleBefore: string,
+): Promise<PendingEmailRow | null> {
+  const candidate = await db
+    .prepare(
+      `SELECT o.id AS outbox_id, o.member_id, o.recipient, o.attempts,
+              m.email, m.purchased_at, m.member_status
+       FROM email_outbox o
+       JOIN founding_members m ON m.id = o.member_id
+       WHERE o.message_type = 'founding_member_confirmation'
+         AND o.attempts < 5
+         AND (
+           o.status = 'pending'
+           OR (o.status = 'failed' AND (o.next_attempt_at IS NULL OR o.next_attempt_at <= ?))
+           OR (o.status = 'sending' AND o.updated_at <= ?)
+         )
+       ORDER BY o.created_at ASC
+       LIMIT 1`,
+    )
+    .bind(now, staleBefore)
+    .first<PendingEmailRow>();
+  if (!candidate) return null;
+
+  const claimed = await db
+    .prepare(
+      `UPDATE email_outbox
+       SET status = 'sending', attempts = attempts + 1, updated_at = ?
+       WHERE id = ?
+         AND attempts < 5
+         AND (
+           status = 'pending'
+           OR (status = 'failed' AND (next_attempt_at IS NULL OR next_attempt_at <= ?))
+           OR (status = 'sending' AND updated_at <= ?)
+         )`,
+    )
+    .bind(now, candidate.outbox_id, now, staleBefore)
+    .run();
+  return (claimed.meta.changes ?? 0) === 1
+    ? { ...candidate, attempts: candidate.attempts + 1 }
+    : null;
+}
+
+export async function markEmailSent(db: D1Database, outboxId: string, now: string): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE email_outbox
+       SET status = 'sent', sent_at = ?, updated_at = ?, last_error = NULL, next_attempt_at = NULL
+       WHERE id = ?`,
+    )
+    .bind(now, now, outboxId)
+    .run();
+}
+
+export async function markEmailFailed(
+  db: D1Database,
+  outboxId: string,
+  attempts: number,
+  error: string,
+  now: string,
+): Promise<void> {
+  const delaySeconds = [60, 300, 900, 3_600, 21_600][Math.min(attempts - 1, 4)] ?? 21_600;
+  const nextAttemptAt = new Date(Date.now() + delaySeconds * 1_000).toISOString();
+  await db
+    .prepare(
+      `UPDATE email_outbox
+       SET status = 'failed', updated_at = ?, last_error = ?, next_attempt_at = ?
+       WHERE id = ?`,
+    )
+    .bind(now, error.slice(0, 255), nextAttemptAt, outboxId)
+    .run();
 }

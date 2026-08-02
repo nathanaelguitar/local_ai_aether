@@ -1,5 +1,6 @@
 import { createFoundingMemberCheckout, isCheckoutConfigurationValid } from "./checkout";
 import { recordWebhookEventOutcome } from "./db";
+import { processPendingFoundingMemberEmails } from "./email";
 import { checkRequestRateLimit } from "./ratelimit";
 import { lookupCheckoutSessionStatus } from "./sessionStatus";
 import { newStripeClient } from "./stripeClient";
@@ -297,7 +298,7 @@ function methodNotAllowed(env: Env, allow: string): Response {
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const { pathname } = new URL(request.url);
     const method = request.method.toUpperCase();
 
@@ -318,7 +319,10 @@ export default {
         : methodNotAllowed(env, "POST");
     }
     if (pathname === "/v1/webhook") {
-      return method === "POST" ? handleWebhook(request, env) : methodNotAllowed(env, "POST");
+      if (method !== "POST") return methodNotAllowed(env, "POST");
+      const response = await handleWebhook(request, env);
+      if (response.ok) ctx.waitUntil(processPendingFoundingMemberEmails(env));
+      return response;
     }
     if (pathname === "/v1/checkout-session") {
       return method === "GET"
@@ -327,5 +331,8 @@ export default {
     }
 
     return json({ error: "not_found" }, 404, env);
+  },
+  async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(processPendingFoundingMemberEmails(env));
   },
 } satisfies ExportedHandler<Env>;

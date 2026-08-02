@@ -83,7 +83,11 @@ remains nullable for future account claiming.
    `payment_status=paid`.
 10. One D1 transaction creates the Founding Member, queues one confirmation
     email job, marks the event complete, and releases the capacity reservation.
-11. The confirmation page asks the Worker for status. Only the webhook-created
+11. The Worker sends the queued onboarding email through Gmail API using the
+    verified `support@canopychat.app` alias. It includes the iPhone TestFlight
+    link and `CANOPY-TEST` setup code. Delivery retries are independent of
+    Stripe fulfillment and never create another member or charge.
+12. The confirmation page asks the Worker for status. Only the webhook-created
     D1 row can return `confirmed`; a Stripe lookup alone can return only
     `processing`, `not_paid`, or `not_found`.
 
@@ -239,26 +243,18 @@ figures.
 
 ## Email confirmation
 
-`support@canopychat.app` currently uses Cloudflare Email Routing for inbound
-forwarding. It is the correct public sender and reply address, but Email Routing
-does not itself send webhook-triggered transactional messages.
+`support@canopychat.app` is configured as a verified Gmail “send as” alias for
+the authenticated Canopy mailbox. The Worker uses Gmail API OAuth, not an SMTP
+password. The app password used during Gmail’s one-time alias verification is
+not needed by production and is not stored in the repository.
 
-Until outbound sending is enabled:
+After verified payment fulfillment, the email includes:
 
-- enable Stripe’s successful-payment receipts in the Dashboard;
-- treat the D1 `email_outbox` row as the integration point for a separate
-  Founding Member onboarding message;
-- do not send beta credentials from the payment webhook.
-
-The smallest provider addition is Cloudflare Email Service with
-`support@canopychat.app` as the allowed sender and an Email Sending binding on
-this Worker. Sending to arbitrary purchaser addresses requires a Workers Paid
-plan. Do not add the binding to production until the plan and sender domain are
-approved and active.
-
-The future email sender should send only after a pending outbox row exists and
-should include: one-time payment, no recurring billing, beta invitation arrives
-separately, Premium begins on activation, and `support@canopychat.app`.
+- the iPhone TestFlight link;
+- the `CANOPY-TEST` beta code;
+- the one-time payment and no-recurring-billing explanation;
+- the fact that the three-month Premium period begins at beta activation;
+- `support@canopychat.app` for help.
 
 Stripe’s receipt is not a replacement for that onboarding email.
 
@@ -272,6 +268,9 @@ Secrets, set with Cloudflare’s secret store:
 | `STRIPE_WEBHOOK_SECRET` | Test webhook `whsec_...` secret |
 | `STRIPE_FOUNDING_MEMBER_PRICE_ID` | Test one-time `price_...` ID |
 | `RATE_LIMIT_SALT` | At least 32 random bytes for HMAC pseudonyms |
+| `GMAIL_CLIENT_ID` | Google OAuth client ID |
+| `GMAIL_CLIENT_SECRET` | Google OAuth client secret |
+| `GMAIL_REFRESH_TOKEN` | OAuth refresh token with `gmail.send` scope |
 
 Non-secret vars in `wrangler.toml`:
 
@@ -279,6 +278,9 @@ Non-secret vars in `wrangler.toml`:
 | --- | --- |
 | `ENVIRONMENT` | `test` |
 | `LIVE_PAYMENTS_ENABLED` | `false` |
+| `GMAIL_SENDER` | `support@canopychat.app` |
+| `TESTFLIGHT_URL` | `https://testflight.apple.com/join/f5xCZmVv` |
+| `TESTFLIGHT_CODE` | `CANOPY-TEST` |
 | `PUBLIC_SITE_URL` | `https://canopychat.app` |
 | `OFFER_VERSION` | `founding_member_v1` |
 | `FOUNDING_MEMBER_CAPACITY` | `1000` |

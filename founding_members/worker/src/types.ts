@@ -10,6 +10,12 @@ export interface Env {
   OFFER_VERSION: string;
   /** Required positive integer. Checkout stays disabled when absent/invalid. */
   FOUNDING_MEMBER_CAPACITY: string;
+  GMAIL_CLIENT_ID?: string;
+  GMAIL_CLIENT_SECRET?: string;
+  GMAIL_REFRESH_TOKEN?: string;
+  GMAIL_SENDER?: string;
+  TESTFLIGHT_URL?: string;
+  TESTFLIGHT_CODE?: string;
 }
 
 export interface FoundingMemberRow {
