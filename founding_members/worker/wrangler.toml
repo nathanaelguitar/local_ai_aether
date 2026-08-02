@@ -30,14 +30,14 @@ binding = "DB"
 database_name = "canopy-founding-members"
 database_id = "b5f9dea2-5fab-4b6e-83fd-4007b2c30eb5"
 
-# Isolated live environment. Keep LIVE_PAYMENTS_ENABLED false until the live
+# Isolated live environment. Live payments are enabled only after the live
 # Product/Price, restricted key, webhook secret, and D1 migration are verified.
 [env.production]
 name = "canopy-founding-members-live"
 
 [env.production.vars]
 ENVIRONMENT = "live"
-LIVE_PAYMENTS_ENABLED = "false"
+LIVE_PAYMENTS_ENABLED = "true"
 PUBLIC_SITE_URL = "https://canopychat.app"
 OFFER_VERSION = "founding_member_v1"
 FOUNDING_MEMBER_CAPACITY = "1000"
