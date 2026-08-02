@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CanopyChat — University Flier</title>
+  <style>
+    :root {
+      --bark: #211812;
+      --cream: #fff4df;
+      --paper: #f5ead4;
+      --oak: #7a4a23;
+      --moss: #6f8b55;
+      --moss-light: #cfe3b7;
+      --line: rgba(122, 74, 35, 0.18);
+      --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+      --sans: "Avenir Next", "Gill Sans", "Trebuchet MS", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    @page {
+      size: 8.5in 11in;
+      margin: 0;
+    }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: var(--cream);
+      color: var(--bark);
+      font-family: var(--sans);
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    .sheet {
+      width: 8.5in;
+      min-height: 11in;
+      margin: 0 auto;
+      padding: 0.55in 0.6in 0.5in;
+      background:
+        radial-gradient(circle at 15% 12%, rgba(163, 106, 53, 0.18), transparent 22rem),
+        radial-gradient(circle at 85% 30%, rgba(111, 139, 85, 0.14), transparent 20rem),
+        linear-gradient(160deg, var(--cream), var(--paper));
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      overflow: hidden;
+    }
+    .sheet::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background-image:
+        repeating-linear-gradient(174deg, rgba(122, 74, 35, 0.05) 0 2px, transparent 2px 112px);
+      pointer-events: none;
+    }
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: relative;
+      z-index: 1;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-family: var(--serif);
+      font-weight: 800;
+      font-size: 20px;
+      letter-spacing: -0.04em;
+    }
+    .brand img {
+      width: 38px;
+      height: 38px;
+      border-radius: 11px;
+      box-shadow: 0 6px 16px rgba(47, 82, 51, 0.22);
+    }
+    .eyebrow-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 6px 12px;
+      border-radius: 999px;
+      background: rgba(111, 139, 85, 0.14);
+      border: 1px solid rgba(111, 139, 85, 0.22);
+      color: #55703f;
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+    .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--moss);
+      box-shadow: 0 0 0 3px rgba(111, 139, 85, 0.18);
+    }
+
+    .headline {
+      position: relative;
+      z-index: 1;
+      margin: 28px 0 0;
+    }
+    .headline .kicker {
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--oak);
+      margin-bottom: 10px;
+    }
+    .headline h1 {
+      font-family: var(--serif);
+      font-size: 62px;
+      line-height: 0.92;
+      letter-spacing: -0.05em;
+      margin: 0;
+      max-width: 6.8in;
+    }
+    .headline h1 span {
+      color: var(--moss);
+    }
+    .sub {
+      position: relative;
+      z-index: 1;
+      margin: 18px 0 0;
+      max-width: 5.2in;
+      font-size: 17px;
+      line-height: 1.55;
+      color: #5a4433;
+    }
+    .sub strong {
+      color: var(--bark);
+      font-weight: 800;
+    }
+
+    .middle {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-columns: 1fr 1.7in;
+      gap: 26px;
+      margin-top: 28px;
+      align-items: start;
+    }
+
+    .points {
+      display: grid;
+      gap: 14px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+    .point {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+      padding: 14px 16px;
+      border-radius: 18px;
+      background: rgba(255,255,255,0.62);
+      border: 1px solid var(--line);
+      box-shadow: 0 8px 24px rgba(38,24,12,0.06);
+    }
+    .point-icon {
+      flex: 0 0 auto;
+      width: 32px;
+      height: 32px;
+      border-radius: 9px;
+      display: grid;
+      place-items: center;
+      background: rgba(255, 247, 232, 0.9);
+      border: 1px solid var(--line);
+      font-size: 16px;
+    }
+    .point b {
+      display: block;
+      font-family: var(--serif);
+      font-size: 15px;
+      letter-spacing: -0.02em;
+      margin-bottom: 2px;
+    }
+    .point span {
+      font-size: 13px;
+      color: #6d5847;
+      line-height: 1.45;
+    }
+
+    .qr-card {
+      background: #ffffff;
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      padding: 14px 14px 12px;
+      box-shadow: 0 18px 40px rgba(38,24,12,0.12);
+      text-align: center;
+    }
+    .qr-card img {
+      width: 100%;
+      height: auto;
+      border-radius: 12px;
+      display: block;
+    }
+    .qr-label {
+      margin-top: 10px;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--oak);
+    }
+    .qr-url {
+      margin-top: 4px;
+      font-size: 12px;
+      color: #7a6454;
+      font-weight: 700;
+      word-break: break-all;
+    }
+
+    .cta-band {
+      position: relative;
+      z-index: 1;
+      margin-top: 28px;
+      padding: 18px 20px;
+      border-radius: 18px;
+      background: linear-gradient(165deg, #211812, #34261d);
+      color: var(--cream);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .cta-band h3 {
+      font-family: var(--serif);
+      font-size: 19px;
+      margin: 0 0 4px;
+      letter-spacing: -0.03em;
+    }
+    .cta-band p {
+      margin: 0;
+      font-size: 12.5px;
+      color: #d9c6b1;
+      line-height: 1.5;
+      max-width: 4in;
+    }
+    .cta-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 14px;
+      border-radius: 999px;
+      background: rgba(255,244,223,0.12);
+      border: 1px solid rgba(255,244,223,0.18);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .footer {
+      position: relative;
+      z-index: 1;
+      margin-top: auto;
+      padding-top: 18px;
+      border-top: 1px solid var(--line);
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      font-size: 10px;
+      color: #8a7563;
+    }
+
+    /* Tear-off variant hint */
+    .tear-line {
+      position: relative;
+      z-index: 1;
+      margin-top: 18px;
+      border-top: 2px dashed var(--line);
+      display: flex;
+    }
+    .tear-tab {
+      flex: 1;
+      padding: 8px 3px;
+      text-align: center;
+      font-size: 9px;
+      font-weight: 700;
+      border-right: 1px dashed var(--line);
+      writing-mode: horizontal-tb;
+      line-height: 1.2;
+    }
+    .tear-tab:last-child { border-right: 0; }
+    .tear-tab small {
+      display: block;
+      font-size: 7px;
+      opacity: 0.7;
+      margin-top: 2px;
+    }
+
+    @media screen and (max-width: 850px) {
+      .sheet { width: 100%; min-height: auto; }
+    }
+  </style>
+</head>
+<body>
+  <div class="sheet">
+    <div class="topbar">
+      <div class="brand">
+        <img src="app-icon.png" alt="CanopyChat">
+        CanopyChat
+      </div>
+      <div class="eyebrow-pill"><span class="dot"></span> Eco-Friendly Intelligence • On iPhone</div>
+    </div>
+
+    <div class="headline">
+      <div class="kicker">For students who care what their tech costs</div>
+      <h1>Your AI shouldn't <span>cost the planet.</span></h1>
+      <p class="sub">Most chatbots live in <strong>warehouse-size data centers</strong> that burn electricity 24/7 and guzzle water to stay cool. <strong>CanopyChat lives on your phone — just your phone.</strong> No extra warehouses. Private by default.</p>
+    </div>
+
+    <div class="middle">
+      <ul class="points">
+        <li class="point">
+          <div class="point-icon">📱</div>
+          <div><b>Just your phone</b><span>No data center needed. Chats stay on-device, not on someone else's computer.</span></div>
+        </li>
+        <li class="point">
+          <div class="point-icon">💧</div>
+          <div><b>No water wasted</b><span>Server farms use millions of gallons for cooling. Canopy keeps its cool in your pocket.</span></div>
+        </li>
+        <li class="point">
+          <div class="point-icon">🌿</div>
+          <div><b>Climate-contributing</b><span>A percentage of revenue goes to permanent carbon removal via Stripe Climate.</span></div>
+        </li>
+        <li class="point">
+          <div class="point-icon">🔒</div>
+          <div><b>Private by default</b><span>History stays on your iPhone unless you choose to share it.</span></div>
+        </li>
+      </ul>
+
+      <div class="qr-card">
+        <img src="qr-code.png" alt="QR code to founding members page">
+        <div class="qr-label">Scan to join founding group</div>
+        <div class="qr-url">canopychat.app/founding.html</div>
+      </div>
+    </div>
+
+    <div class="cta-band">
+      <div>
+        <h3>Become a Founding Member</h3>
+        <p>Early access before public launch + 3 months Premium in beta to help shape a lighter, more thoughtful AI. Limited enrollment — one group at a time.</p>
+      </div>
+      <div class="cta-badge">Student-friendly • Limited</div>
+    </div>
+
+    <div class="footer">
+      <span>CanopyChat — Private, on-device intelligence. canopychat.app</span>
+      <span>Climate commitment via Stripe Climate • US beta enrollment</span>
+    </div>
+
+    <!-- Optional tear-off tabs for bulletin boards -->
+    <div class="tear-line" aria-hidden="true">
+      <div class="tear-tab">CanopyChat<br>Private AI that treads lighter<small>canopychat.app/founding.html</small></div>
+      <div class="tear-tab">CanopyChat<br>Private AI that treads lighter<small>canopychat.app/founding.html</small></div>
+      <div class="tear-tab">CanopyChat<br>Private AI that treads lighter<small>canopychat.app/founding.html</small></div>
+      <div class="tear-tab">CanopyChat<br>Private AI that treads lighter<small>canopychat.app/founding.html</small></div>
+      <div class="tear-tab">CanopyChat<br>Private AI that treads lighter<small>canopychat.app/founding.html</small></div>
+      <div class="tear-tab">CanopyChat<br>Private AI that treads lighter<small>canopychat.app/founding.html</small></div>
+      <div class="tear-tab">CanopyChat<br>Private AI that treads lighter<small>canopychat.app/founding.html</small></div>
+      <div class="tear-tab">CanopyChat<br>Private AI that treads lighter<small>canopychat.app/founding.html</small></div>
+    </div>
+  </div>
+</body>
+</html>
