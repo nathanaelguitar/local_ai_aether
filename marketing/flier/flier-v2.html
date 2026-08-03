@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CanopyChat — Flier v2</title>
+  <style>
+    :root {
+      --bark: #211812;
+      --cream: #fff4df;
+      --paper: #f5ead4;
+      --oak: #7a4a23;
+      --moss: #6f8b55;
+      --moss-dark: #50683e;
+      --moss-light: #dbe9c7;
+      --ink-soft: #654f3d;
+      --line: rgba(33, 24, 18, 0.18);
+      --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+      --sans: "Avenir Next", "Gill Sans", "Trebuchet MS", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    @page {
+      size: 8.5in 11in;
+      margin: 0;
+    }
+
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      background: #e8dfcf;
+      color: var(--bark);
+      font-family: var(--sans);
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+
+    .sheet {
+      width: 8.5in;
+      min-height: 11in;
+      margin: 0 auto;
+      padding: 0.45in 0.5in 0.32in;
+      background:
+        radial-gradient(circle at 87% 14%, rgba(111, 139, 85, 0.2), transparent 3.2in),
+        var(--cream);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+      font-family: var(--serif);
+      font-size: 27px;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+    }
+
+    .brand img {
+      width: 45px;
+      height: 45px;
+      border-radius: 13px;
+      box-shadow: 0 8px 18px rgba(47, 82, 51, 0.22);
+    }
+
+    .promise {
+      max-width: 3.45in;
+      color: var(--moss-dark);
+      font-size: 12px;
+      font-weight: 900;
+      line-height: 1.3;
+      letter-spacing: 0.1em;
+      text-align: right;
+      text-transform: uppercase;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 2.05in;
+      gap: 26px;
+      align-items: center;
+      margin-top: 21px;
+      padding: 36px 28px 35px;
+      border-radius: 16px;
+      background: var(--bark);
+      color: var(--cream);
+      box-shadow: 0 18px 40px rgba(33, 24, 18, 0.16);
+    }
+
+    .hero h1 {
+      max-width: 4.4in;
+      margin: 0;
+      font-family: var(--serif);
+      font-size: 64px;
+      font-weight: 800;
+      line-height: 0.91;
+      letter-spacing: -0.035em;
+      text-wrap: balance;
+    }
+
+    .hero h1 .green {
+      color: var(--moss-light);
+    }
+
+    .hero-copy {
+      max-width: 4.3in;
+      margin: 20px 0 0;
+      color: #eadbc9;
+      font-size: 18px;
+      line-height: 1.44;
+    }
+
+    .hero-copy strong {
+      color: #ffffff;
+      font-weight: 850;
+    }
+
+    .qr-card {
+      padding: 16px 16px 15px;
+      border-radius: 15px;
+      background: #ffffff;
+      color: var(--bark);
+      text-align: center;
+      box-shadow: 0 12px 28px rgba(0, 0, 0, 0.22);
+    }
+
+    .qr-card img {
+      display: block;
+      width: 100%;
+      height: auto;
+      border-radius: 8px;
+    }
+
+    .qr-overline {
+      margin-top: 9px;
+      color: var(--oak);
+      font-size: 16px;
+      font-weight: 900;
+      line-height: 1;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    .qr-label {
+      margin-top: 4px;
+      font-family: var(--serif);
+      font-size: 27px;
+      font-weight: 900;
+      line-height: 0.95;
+      letter-spacing: -0.025em;
+      text-transform: uppercase;
+    }
+
+    .qr-url {
+      margin-top: 8px;
+      color: #6b5848;
+      font-size: 11px;
+      font-weight: 800;
+      line-height: 1.2;
+    }
+
+    .proofs {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      margin-top: 24px;
+      border-top: 2px solid var(--bark);
+      border-bottom: 2px solid var(--bark);
+    }
+
+    .proof {
+      min-height: 125px;
+      padding: 20px 18px 19px 0;
+    }
+
+    .proof:nth-child(even) {
+      padding-right: 0;
+      padding-left: 22px;
+      border-left: 1px solid var(--line);
+    }
+
+    .proof:nth-child(n + 3) {
+      border-top: 1px solid var(--line);
+    }
+
+    .proof h2 {
+      margin: 0 0 6px;
+      font-family: var(--serif);
+      font-size: 23px;
+      font-weight: 850;
+      line-height: 1.06;
+      letter-spacing: -0.025em;
+    }
+
+    .proof h2 span {
+      display: inline-block;
+      min-width: 24px;
+      margin-right: 6px;
+      color: var(--moss-dark);
+      font-family: var(--sans);
+      font-size: 13px;
+      font-weight: 900;
+      letter-spacing: 0.08em;
+      vertical-align: 3px;
+    }
+
+    .proof p {
+      margin: 0;
+      color: var(--ink-soft);
+      font-size: 15.5px;
+      line-height: 1.38;
+    }
+
+    .founding {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      margin-top: 20px;
+      padding: 20px 23px 21px;
+      border-radius: 14px;
+      background: var(--moss-dark);
+      color: #ffffff;
+    }
+
+    .founding h2 {
+      margin: 0;
+      font-family: var(--serif);
+      font-size: 28px;
+      font-weight: 850;
+      line-height: 1;
+      letter-spacing: -0.025em;
+    }
+
+    .founding p {
+      max-width: 4.9in;
+      margin: 7px 0 0;
+      color: #f0f4e9;
+      font-size: 14.5px;
+      line-height: 1.35;
+    }
+
+    .founding-mark {
+      flex: 0 0 auto;
+      color: var(--moss-light);
+      font-size: 13px;
+      font-weight: 900;
+      line-height: 1.35;
+      letter-spacing: 0.08em;
+      text-align: right;
+      text-transform: uppercase;
+    }
+
+    .footer {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      margin-top: 15px;
+      color: #796553;
+      font-size: 11px;
+      line-height: 1.3;
+    }
+
+    .tear-line {
+      display: flex;
+      margin-top: 12px;
+      border-top: 2px dashed rgba(33, 24, 18, 0.22);
+    }
+
+    .tear-tab {
+      flex: 1;
+      padding: 7px 3px 0;
+      border-right: 1px dashed rgba(33, 24, 18, 0.18);
+      font-size: 8px;
+      font-weight: 800;
+      line-height: 1.15;
+      text-align: center;
+    }
+
+    .tear-tab:last-child { border-right: 0; }
+
+    .tear-tab small {
+      display: block;
+      margin-top: 3px;
+      color: #796553;
+      font-size: 6.5px;
+      font-weight: 700;
+    }
+
+    @media print {
+      html,
+      body { background: transparent; }
+    }
+
+    @media screen and (max-width: 850px) {
+      html,
+      body { overflow-x: hidden; }
+
+      .sheet {
+        width: 100%;
+        min-height: 100vh;
+        padding: 24px 18px 28px;
+      }
+
+      .topbar {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .promise {
+        max-width: none;
+        text-align: left;
+      }
+
+      .hero {
+        grid-template-columns: minmax(0, 1fr);
+        padding: 25px 22px;
+      }
+
+      .hero h1 {
+        font-size: clamp(43px, 13vw, 57px);
+      }
+
+      .hero-copy {
+        font-size: 16px;
+      }
+
+      .qr-card {
+        width: min(250px, 100%);
+        justify-self: center;
+      }
+
+      .proofs {
+        grid-template-columns: 1fr;
+      }
+
+      .proof,
+      .proof:nth-child(even) {
+        min-height: 0;
+        padding: 18px 0;
+        border-left: 0;
+      }
+
+      .proof:nth-child(n + 2) {
+        border-top: 1px solid var(--line);
+      }
+
+      .founding {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .founding-mark { text-align: left; }
+      .footer { flex-direction: column; }
+      .tear-line { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="sheet">
+    <header class="topbar">
+      <div class="brand">
+        <img src="app-icon.png" alt="CanopyChat app icon">
+        CanopyChat
+      </div>
+      <div class="promise">Private • On-device • Climate-contributing</div>
+    </header>
+
+    <section class="hero" aria-labelledby="flier-title">
+      <div>
+        <h1 id="flier-title">AI in your pocket. <span class="green">Not a data center.</span></h1>
+        <p class="hero-copy">CanopyChat runs <strong>right on your iPhone</strong>—keeping your chats private and your AI footprint lighter.</p>
+      </div>
+
+      <div class="qr-card">
+        <img src="qr-code.png" alt="QR code to learn more about CanopyChat founding membership">
+        <div class="qr-overline">Learn more</div>
+        <div class="qr-label">Scan here</div>
+        <div class="qr-url">canopychat.app/founding.html</div>
+      </div>
+    </section>
+
+    <section class="proofs" aria-label="Why CanopyChat is different">
+      <article class="proof">
+        <h2><span>01</span>Runs on your iPhone</h2>
+        <p>No remote data center needed. Your chats stay on your device, not someone else’s computer.</p>
+      </article>
+      <article class="proof">
+        <h2><span>02</span>No cooling water</h2>
+        <p>Server farms use water to stay cool. CanopyChat keeps its intelligence in your pocket.</p>
+      </article>
+      <article class="proof">
+        <h2><span>03</span>Private by default</h2>
+        <p>Your history stays on your iPhone unless you choose to share it.</p>
+      </article>
+      <article class="proof">
+        <h2><span>04</span>Climate-contributing</h2>
+        <p>A percentage of revenue supports permanent carbon removal through Stripe Climate.</p>
+      </article>
+    </section>
+
+    <section class="founding" aria-label="Founding member invitation">
+      <div>
+        <h2>Become a Founding Member</h2>
+        <p>Get early access before public launch plus 3 months of Premium during beta—and help shape a more thoughtful kind of AI.</p>
+      </div>
+      <div class="founding-mark">Student-friendly<br>Limited enrollment</div>
+    </section>
+
+    <footer class="footer">
+      <span>CanopyChat — private, on-device intelligence • canopychat.app</span>
+      <span>Climate commitment via Stripe Climate • US beta enrollment</span>
+    </footer>
+
+    <div class="tear-line" aria-hidden="true">
+      <div class="tear-tab">CanopyChat<br>Private AI on your iPhone<small>canopychat.app/founding.html</small></div>
+      <div class="tear-tab">CanopyChat<br>Private AI on your iPhone<small>canopychat.app/founding.html</small></div>
+      <div class="tear-tab">CanopyChat<br>Private AI on your iPhone<small>canopychat.app/founding.html</small></div>
+      <div class="tear-tab">CanopyChat<br>Private AI on your iPhone<small>canopychat.app/founding.html</small></div>
+      <div class="tear-tab">CanopyChat<br>Private AI on your iPhone<small>canopychat.app/founding.html</small></div>
+      <div class="tear-tab">CanopyChat<br>Private AI on your iPhone<small>canopychat.app/founding.html</small></div>
+      <div class="tear-tab">CanopyChat<br>Private AI on your iPhone<small>canopychat.app/founding.html</small></div>
+    </div>
+  </main>
+</body>
+</html>
